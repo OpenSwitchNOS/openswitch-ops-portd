@@ -161,6 +161,8 @@ static void ops_portd_exit(struct unixctl_conn *conn, int argc OVS_UNUSED,
 extern int
 portd_get_prefix(int family, char *ip_address, void *prefix,
                  unsigned char *prefixlen);
+void
+portd_del_subinterface(const char *sub_interface_name);
 
 /*
  * Lookup port entry from DB
@@ -954,7 +956,7 @@ portd_interface_up_down(const char *interface_name, const char *status)
         return;
     }
 }
-/*
+
 static int
 add_link_attr(struct nlmsghdr *n, int nlmsg_maxlen,
         int attr_type, const void *payload, int payload_len)
@@ -975,12 +977,12 @@ add_link_attr(struct nlmsghdr *n, int nlmsg_maxlen,
     n->nlmsg_len = NLMSG_ALIGN(n->nlmsg_len) + RTA_ALIGN(len);
     return 0;
 }
-*/
+
 
 bool
 portd_reconfigure_subinterface(const struct ovsrec_port *port_row)
 {
-    //int ifindex;
+    int ifindex;
 
     struct {
         struct nlmsghdr  n;
@@ -1027,8 +1029,9 @@ portd_reconfigure_subinterface(const struct ovsrec_port *port_row)
         intf_status = false;
     }
 
-#if 0
-    if (0 == (ifindex = if_nametoindex(port_row->name)))
+    if(0 == vlan_tag) intf_status = false;
+    portd_del_subinterface(port_row->name);
+    if (0 != vlan_tag) {
     {
         VLOG_INFO("Creating subinterface %s", port_row->name);
 
@@ -1048,7 +1051,7 @@ portd_reconfigure_subinterface(const struct ovsrec_port *port_row)
         struct rtattr *linkinfo = NLMSG_TAIL(&req.n);
         add_link_attr(&req.n, sizeof(req), IFLA_LINKINFO, NULL, 0);
         add_link_attr(&req.n, sizeof(req), IFLA_INFO_KIND,
-                                     INTERFACE_TYPE_VLAN, 4);
+                                         INTERFACE_TYPE_VLAN, 4);
 
         struct rtattr * data = NLMSG_TAIL(&req.n);
         add_link_attr(&req.n, sizeof(req), IFLA_INFO_DATA, NULL, 0);
@@ -1067,75 +1070,9 @@ portd_reconfigure_subinterface(const struct ovsrec_port *port_row)
                     port_row->name, strerror(errno));
             return false;
         }
-    } else {
-        VLOG_INFO("Updating subinterface %s", port_row->name);
-        req.n.nlmsg_len = NLMSG_SPACE(sizeof(struct ifinfomsg));
-        req.n.nlmsg_pid     = getpid();
-        req.n.nlmsg_type    = RTM_NEWLINK;
-        req.n.nlmsg_flags   = NLM_F_REQUEST;
-
-        req.i.ifi_family    = AF_UNSPEC;
-
-        struct rtattr *linkinfo = NLMSG_TAIL(&req.n);
-        add_link_attr(&req.n, sizeof(req), IFLA_LINKINFO, NULL, 0);
-        add_link_attr(&req.n, sizeof(req), IFLA_INFO_KIND,
-                              INTERFACE_TYPE_VLAN, 4);
-
-        struct rtattr * data = NLMSG_TAIL(&req.n);
-        add_link_attr(&req.n, sizeof(req), IFLA_INFO_DATA, NULL, 0);
-        add_link_attr(&req.n, sizeof(req), IFLA_VLAN_ID, &vlan_tag, 2);
-
-        /* Adjust rta_len for attributes */
-        data->rta_len = (void *)NLMSG_TAIL(&req.n) - (void *)data;
-        linkinfo->rta_len = (void *)NLMSG_TAIL(&req.n) - (void *)linkinfo;
-
-        if (send(nl_sock, &req, req.n.nlmsg_len, 0) == -1) {
-            VLOG_ERR("Netlink failed to create sub interface: %s (%s)",
-                    port_row->name, strerror(errno));
-            return false;
-        }
     }
-#endif
-    if(0 == vlan_tag) intf_status = false;
-    {
-        char str[512] = {0};
-        snprintf(str, 512, "/sbin/ip netns exec swns /sbin/ip link delete %s",
-                port_row->name);
-        if (system(str) != 0)
-        {
-            VLOG_ERR("Failed to remove subinterface. cmd=%s, rc=%s",
-                    str, strerror(errno));
-        }
-        if(0 != vlan_tag)
-        {
-            snprintf(str, 512,
-                    "/sbin/ip netns exec swns /sbin/ip link add link %s "
-                    "name %s type vlan id %d",
-                    parent_intf_row->name, port_row->name, vlan_tag);
-            if (system(str) != 0)
-            {
-                VLOG_ERR("Failed to add subinterface. cmd=%s, rc=%s",
-                        str, strerror(errno));
-            }
-        }
-        if(intf_status)
-        {
-            snprintf(str, 512,
-                    "/sbin/ip netns exec swns /sbin/ip link set dev %s up",
-                    port_row->name);
-        }
-        else
-        {
-            snprintf(str, 512,
-                    "/sbin/ip netns exec swns /sbin/ip link set dev %s down",
-                    port_row->name);
-        }
-        if (system(str) != 0) {
-            VLOG_ERR("Failed to remove subinterface. cmd=%s, rc=%s",
-                    str, strerror(errno));
-        }
     }
-    //portd_interface_up_down(port_row->name, intf_status ? "up" : "down");
+    portd_interface_up_down(port_row->name, intf_status ? "up" : "down");
 
     return true;
 }
@@ -1943,48 +1880,38 @@ portd_reconfig_ports(struct vrf *vrf, const struct shash *wanted_ports)
             if((NULL != port->type) &&
                     (strcmp(port->type,
                             OVSREC_INTERFACE_TYPE_VLANSUBINT) == 0)) {
+                char str[512] = {0};
                 portd_reconfigure_subinterface(port_row);
+                if ( port_row->ip4_address != NULL )
                 {
-                    char str[512] = {0};
-                    snprintf(str, 512, "/sbin/ip netns exec swns "
-                            "/sbin/ip address add %s dev %s",
-                            port_row->ip4_address, port_row->name);
-                    if (system(str) != 0)
-                    {
-                        VLOG_ERR("Failed to add subinterface. cmd=%s, rc=%s",
-                                str, strerror(errno));
-                    }
-                    snprintf(str, 512, "/sbin/ip netns exec swns "
+                    nl_add_ip_address(RTM_NEWADDR, port_row->name, port_row->ip4_address,
+                    AF_INET, false);
+                }
+                snprintf(str, 512, "/sbin/ip netns exec swns "
                             "/sbin/ip -6 address add %s dev %s",
                             port_row->ip6_address, port_row->name);
-                    if (system(str) != 0)
-                    {
-                        VLOG_ERR("Failed to add subinterface. cmd=%s, rc=%s",
+                if (system(str) != 0)
+                {
+                    VLOG_ERR("Failed to add subinterface. cmd=%s, rc=%s",
                                 str, strerror(errno));
-                    }
                 }
             }
             if((NULL != port->type) &&
                     (strcmp(port->type,
                             OVSREC_INTERFACE_TYPE_LOOPBACK) == 0)) {
+                char str[512] = {0};
+                if ( port_row->ip4_address != NULL )
                 {
-                    char str[512] = {0};
-                    snprintf(str, 512, "/sbin/ip netns exec swns "
-                            "/sbin/ip address add %s dev %s",
-                            port_row->ip4_address, port_row->name);
-                    if (system(str) != 0)
-                    {
-                        VLOG_ERR("Failed to add subinterface. cmd=%s, rc=%s",
-                                str, strerror(errno));
-                    }
-                    snprintf(str, 512, "/sbin/ip netns exec swns "
+                    nl_add_ip_address(RTM_NEWADDR, port_row->name, port_row->ip4_address,
+                    AF_INET, false);
+                }
+                snprintf(str, 512, "/sbin/ip netns exec swns "
                             "/sbin/ip -6 address add %s dev %s",
                             port_row->ip6_address, port_row->name);
-                    if (system(str) != 0)
-                    {
-                        VLOG_ERR("Failed to add subinterface. cmd=%s, rc=%s",
+                if (system(str) != 0)
+                {
+                    VLOG_ERR("Failed to add subinterface. cmd=%s, rc=%s",
                                 str, strerror(errno));
-                    }
                 }
             }
         }
