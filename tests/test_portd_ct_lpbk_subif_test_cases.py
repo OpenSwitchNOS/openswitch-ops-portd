@@ -85,7 +85,7 @@ def portd(**kwargs):
     devIntReturn = device1.DeviceInteract(command="vtysh")
     devIntReturn = device1.DeviceInteract(command="ping 192.158.1.5")
     retCode = devIntReturn.get('buffer')
-    assert "5 packets transmitted, 5 packets received" in retCode,\
+    assert "5 packets transmitted, 5 received" in retCode,\
            "ping is not success!!!"
     LogOutput('info', "ping sucess!!!!")
     devIntReturn = device1.DeviceInteract(command="exit")
@@ -118,7 +118,7 @@ def portd(**kwargs):
     devIntReturn = device1.DeviceInteract(command="vtysh")
     devIntReturn = device1.DeviceInteract(command="ping 192.158.1.5")
     retCode = devIntReturn.get('buffer')
-    assert "5 packets transmitted, 5 packets received" not in retCode,\
+    assert "5 packets transmitted, 5 received" not in retCode,\
     "ping is still success"
     devIntReturn = device1.DeviceInteract(command="exit")
 
@@ -232,7 +232,7 @@ def portd(**kwargs):
     devIntReturn = device1.DeviceInteract(command="vtysh")
     devIntReturn = device1.DeviceInteract(command="ping 192.168.1.5")
     retCode = devIntReturn.get('buffer')
-    assert "5 packets transmitted, 5 packets received" in retCode,\
+    assert "5 packets transmitted, 5 received" in retCode,\
            "ping is not success!!!"
     LogOutput('info', "ping sucess!!!!")
     devIntReturn = device1.DeviceInteract(command="exit")
@@ -254,7 +254,7 @@ def portd(**kwargs):
     devIntReturn = device1.DeviceInteract(command="vtysh")
     devIntReturn = device1.DeviceInteract(command="ping 192.168.1.2")
     retCode = devIntReturn.get('buffer')
-    assert "5 packets transmitted, 5 packets received" not in retCode,\
+    assert "5 packets transmitted, 5 received" not in retCode,\
     "ping is still success"
     devIntReturn = device1.DeviceInteract(command="exit")
 
@@ -275,6 +275,10 @@ class Test_portd:
         Test_portd.testObj = testEnviron(topoDict=topoDict)
         # Get topology object
         Test_portd.topoObj = Test_portd.testObj.topoObjGet()
+        if Test_portd.topoObj.topoType == "physical":
+            LogOutput('info',
+                      "Skipping test physical run due to defect #744")
+            pytest.skip("Skipping test physical run due to defect #744")
 
     def teardown_class(cls):
         Test_portd.topoObj.terminate_nodes()
