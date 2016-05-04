@@ -18,7 +18,6 @@
 from opsvsi.docker import *
 from opsvsi.opsvsitest import *
 
-
 class connectedRoutesCTTest(OpsVsiTest):
 
     def setupNet(self):
@@ -35,8 +34,6 @@ class connectedRoutesCTTest(OpsVsiTest):
         info('\n### Configuring the topology ###\n')
         s1 = self.net.switches[0]
 
-        s1.ovscmd("/usr/bin/ovs-vsctl set interface 1 user_config:admin=up")
-        s1.ovscmd("/usr/bin/ovs-vsctl set interface 2 user_config:admin=up")
 
         # Configure switch s1
         s1.cmdCLI("configure terminal")
@@ -45,12 +42,14 @@ class connectedRoutesCTTest(OpsVsiTest):
         s1.cmdCLI("interface 1")
         s1.cmdCLI("ip address 10.0.10.1/24")
         s1.cmdCLI("ipv6 address 2000::1/120")
+        s1.cmdCLI("no shutdown")
         s1.cmdCLI("exit")
 
         # Configure interface 2 on switch s1
         s1.cmdCLI("interface 2")
         s1.cmdCLI("ip address 10.0.20.1/24")
         s1.cmdCLI("ipv6 address 2001::1/120")
+        s1.cmdCLI("no shutdown")
         s1.cmdCLI("exit")
 
         info('### Switch s1 configured ###\n')
@@ -64,7 +63,7 @@ class connectedRoutesCTTest(OpsVsiTest):
         # Parse the "ovsdb-client dump" output and extract the lines between
         # "Route table" and "Route_Map table". This section will have all the
         # Route table entries. Then parse line by line to match the contents
-        dump = s1.cmd("ovsdb-client dump")
+        dump = s1.cmd("ovsdb-client dump Route")
         lines = dump.split('\n')
         check = False
         count = 0

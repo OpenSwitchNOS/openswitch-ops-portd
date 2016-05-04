@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Hewlett-Packard Development Company, L.P.
+ * Copyright (C) 2015-2016 Hewlett-Packard Development Company, L.P.
  * All Rights Reserved.
  *
  *   Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -47,12 +47,8 @@ extern int init_sock;
 static void apply_mask_ipv6(struct prefix_ipv6 *p);
 static void masklen2ip(const int masklen, struct in_addr *netmask);
 static void apply_mask_ipv4(struct prefix_ipv4 *p);
-static int portd_add_connected_route(char* ip_address,
-                                     struct ovsrec_port *ovs_port, bool is_v4);
 static bool is_route_matched(const struct ovsrec_route *row_route,
                              char *prefix_str, char *port_name);
-static int portd_del_connected_route(char *address, char *port_name,
-                                     bool is_v4);
 int portd_get_prefix(int family, char *ip_address, void *prefix,
                             unsigned char *prefixlen);
 static void portd_set_ipaddr(int cmd, const char *port_name, char *ip_address,
@@ -82,6 +78,88 @@ static void portd_populate_kernel_ip_addr(int family,
 static void portd_populate_db_ip_addr(struct shash *db_port_list,
                                       struct shash *kernel_port_list);
 static void portd_add_port_to_cache(struct port *port);
+
+static int portd_add_connected_route(char* ip_address,
+                                     struct ovsrec_port *ovs_port, bool is_v4);
+static int portd_del_connected_route(char *address, char *port_name,
+                                     bool is_v4);
+
+
+/*
+ * Creates a connected route entry in OVSDB routing table based on
+ * interface up/down status.
+ * 1. interface_name   : Name of the interface/port name.
+ * 2. selected         : If interface state is down selected == down.
+ *                       If interface state is up selected == up.
+ *
+ */
+void
+portd_config_connected_route(const char *interface_name, bool selected)
+{
+
+    struct ovsrec_port* port = NULL;
+    size_t sec_count= 0;
+
+    port = portd_port_db_lookup(interface_name);
+    if (port == NULL)
+        return;
+
+    VLOG_DBG("%s connected route in ovsdb for %s interface.",
+                                     (selected ? "Adding" : "Deleting"),
+                                      interface_name);
+    if (selected == true) {
+        if (port->ip4_address != NULL) {
+            portd_add_connected_route(port->ip4_address, port, true);
+        }
+        if (port->ip4_address_secondary != NULL &&
+            port->ip4_address_secondary[0] != NULL) {
+            for (sec_count=0; sec_count < port->n_ip4_address_secondary;
+                                                                sec_count++) {
+                portd_add_connected_route(
+                          port->ip4_address_secondary[sec_count], port, true);
+            }
+        }
+        if (port->ip6_address != NULL) {
+             portd_add_connected_route(port->ip6_address, port, false);
+        }
+        if (port->ip6_address_secondary != NULL &&
+            port->ip6_address_secondary[0] != NULL) {
+            for (sec_count=0; sec_count < port->n_ip6_address_secondary;
+                                                                sec_count++) {
+                 portd_add_connected_route(
+                           port->ip6_address_secondary[sec_count], port, false);
+            }
+        }
+    }else {
+        if (port->ip4_address != NULL) {
+            portd_del_connected_route(port->ip4_address,
+                                      port->name, true);
+        }
+        if (port->ip4_address_secondary != NULL &&
+            port->ip4_address_secondary[0] != NULL) {
+            for (sec_count=0; sec_count < port->n_ip4_address_secondary;
+                                                                sec_count++) {
+                portd_del_connected_route(
+                                  port->ip4_address_secondary[sec_count],
+                                  port->name, true);
+            }
+        }
+        if (port->ip6_address != NULL) {
+             portd_del_connected_route(port->ip6_address,
+                                       port->name, false);
+        }
+        if (port->ip6_address_secondary != NULL &&
+            port->ip6_address_secondary[0] != NULL) {
+            for (sec_count=0; sec_count < port->n_ip6_address_secondary;
+                                                                sec_count++) {
+                 portd_del_connected_route(
+                       port->ip6_address_secondary[sec_count],
+                       port->name, false);
+            }
+        }
+    }
+    return;
+}
 
 
 /* write to /proc entries to enable/disable Linux ip forwarding(routing) */
@@ -755,6 +833,7 @@ portd_add_connected_route(char* ip_address, struct ovsrec_port *ovs_port,
         VLOG_ERR("No vrf information yet.");
         return -1;
     }
+
     /*
      * Populate the route row
      */
@@ -821,7 +900,7 @@ portd_add_connected_route(char* ip_address, struct ovsrec_port *ovs_port,
      */
     ovsrec_route_set_distance(row, &distance, 1);
     /*
-     * Set the selected bit to true for the route entry
+     * Set the selected bit to true for the route entry.
      */
     ovsrec_route_set_selected(row, &selected, 1);
 
@@ -838,6 +917,8 @@ portd_add_connected_route(char* ip_address, struct ovsrec_port *ovs_port,
     ovsrec_route_set_nexthops(row, &row_nh, row->n_nexthops + 1);
 
     commit_txn = true;
+
+    VLOG_DBG("Added connected route for this ip : %s", ip_address);
 
     return 0;
 }
@@ -868,6 +949,7 @@ portd_del_connected_route(char *address, char *port_name, bool is_v4)
     int retval;
     char prefix_str[256];
     const struct ovsrec_route *row_route = NULL;
+
 
     /*
      * Get the ip address from the port and convert it to the
@@ -907,6 +989,7 @@ portd_del_connected_route(char *address, char *port_name, bool is_v4)
                 ovsrec_nexthop_delete(row_route->nexthops[0]);
                 ovsrec_route_delete(row_route);
                 commit_txn = true;
+                VLOG_DBG("Removed connected route for this ip : %s", address);
                 return 0;
             }
         }
@@ -946,6 +1029,7 @@ portd_del_connected_route(char *address, char *port_name, bool is_v4)
                 ovsrec_nexthop_delete(row_route->nexthops[0]);
                 ovsrec_route_delete(row_route);
                 commit_txn = true;
+                VLOG_DBG("Removed connected route for this ip : %s", address);
                 return 0;
             }
         }
@@ -1013,6 +1097,28 @@ portd_get_prefix(int family, char *ip_address, void *prefix,
     return 0;
 }
 
+/* Check any interface link status is UP in port.
+ * Return Value: ture : Any interface link status is up.
+ *               false: All interface's link status is down.
+ */
+static bool
+portd_check_any_interface_linkstate_for_port(struct ovsrec_port* port)
+{
+    size_t n_interfaces;
+
+    if (port != NULL) {
+        for(n_interfaces=0; n_interfaces < port->n_interfaces; n_interfaces++)
+        {
+            if ( port->interfaces[n_interfaces]->link_state &&
+                (strcmp(port->interfaces[n_interfaces]->link_state,
+                                                       "up") == 0)) {
+                return true;
+            }
+         }
+    }
+    return false;
+}
+
 /* Set IP address on Linux interface using netlink sockets */
 static void
 portd_set_ipaddr(int cmd, const char *port_name, char *ip_address,
@@ -1026,33 +1132,21 @@ portd_set_ipaddr(int cmd, const char *port_name, char *ip_address,
      */
     if (cmd == RTM_NEWADDR) {
         port = portd_port_db_lookup(port_name);
-        if (family == AF_INET) {
-
             /*
-             * Add the new IP route into OVSDB
+             * Add the new IPv4/IPv6 route into OVSDB when interface is up
              */
-            portd_add_connected_route(ip_address, port, true);
-        } else {
-
-            /*
-             * Add the new IPv6 route into OVSDB
-             */
-            portd_add_connected_route(ip_address, port, false);
+        if (port && port->admin && (strcmp(port->admin, "up") == 0)) {
+            if (portd_check_any_interface_linkstate_for_port(port) == true) {
+                portd_add_connected_route(ip_address, port,
+                                         (family == AF_INET) ? true : false);
+            }
         }
     } else {
-        if (family == AF_INET) {
-
-            /*
-             * Delete the new IP route into OVSDB
-             */
-            portd_del_connected_route(ip_address, (char*)port_name, true);
-        } else {
-
-            /*
-             * Delete the new IPv6 route into OVSDB
-             */
-            portd_del_connected_route(ip_address, (char*)port_name, false);
-        }
+       /*
+        * Delete the IPv4/IPv6 route in OVSDB
+        */
+        portd_del_connected_route(ip_address, (char*)port_name,
+                                  (family == AF_INET) ? true : false);
     }
 }
 

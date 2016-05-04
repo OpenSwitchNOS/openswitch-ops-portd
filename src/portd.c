@@ -136,8 +136,9 @@ static inline void portd_chk_for_system_configured(void);
 /* Netlink related functions */
 static void portd_vlan_intf_config_on_init(int intf_index,
                                            struct rtattr *link_info);
-static void portd_update_kernel_intf_up_down (char *intf_name);
 static void parse_nl_new_link_msg(struct nlmsghdr *h, struct shash *kernel_port_list);
+static void portd_update_kernel_intf_up_down (char *intf_name,
+                                              const unsigned *intf_flags);
 static void portd_netlink_socket_open(int *sock, bool is_init_sock);
 
 static void portd_init(const char *remote);
@@ -964,9 +965,12 @@ portd_vlan_intf_config_on_init(int intf_index, struct rtattr *link_info)
 /*
  * Fetch the OVSDB interface row and update the kernel with
  * admin up/down messages
+ * intf_flags : If not equal to NULL port up/down configuration
+ *              for Kernel event.
+ *            : If equal to NULL port up/down configuration for VRF/user event.
  */
 static void
-portd_update_kernel_intf_up_down(char *intf_name)
+portd_update_kernel_intf_up_down(char *intf_name, const unsigned *intf_flags)
 {
     const struct ovsrec_interface *interface_row = NULL;
     struct smap user_config;
@@ -977,16 +981,17 @@ portd_update_kernel_intf_up_down(char *intf_name)
             smap_clone(&user_config, &interface_row->user_config);
             admin_status = smap_get(&user_config,
                                     INTERFACE_USER_CONFIG_MAP_ADMIN);
-
             if (admin_status != NULL &&
                 !strcmp(admin_status,
                         OVSREC_INTERFACE_USER_CONFIG_ADMIN_UP)) {
-                portd_interface_up_down(interface_row->name,
+                if (!intf_flags || !(*intf_flags & IFF_UP)) {
+                    portd_interface_up_down(interface_row->name,
                                         OVSREC_INTERFACE_USER_CONFIG_ADMIN_UP);
-            } else {
-                portd_interface_up_down(interface_row->name,
+                }
+             } else if (!intf_flags || (*intf_flags & IFF_UP)) {
+                    portd_interface_up_down(interface_row->name,
                                         OVSREC_INTERFACE_USER_CONFIG_ADMIN_DOWN);
-            }
+             }
             smap_destroy(&user_config);
         }
     }
@@ -1003,6 +1008,7 @@ parse_nl_new_link_msg(struct nlmsghdr *h, struct shash *kernel_port_list)
     struct ifinfomsg *iface;
     struct rtattr *attribute;
     int len;
+    unsigned iface_flag;
 
     iface = NLMSG_DATA(h);
     len = h->nlmsg_len - NLMSG_LENGTH(sizeof(*iface));
@@ -1021,7 +1027,9 @@ parse_nl_new_link_msg(struct nlmsghdr *h, struct shash *kernel_port_list)
                 shash_add_once(kernel_port_list, (char *)RTA_DATA(attribute), port);
             }
 
-            portd_update_kernel_intf_up_down((char *)RTA_DATA(attribute));
+            iface_flag = iface->ifi_flags;
+            portd_update_kernel_intf_up_down((char *)RTA_DATA(attribute),
+                                                            &iface_flag);
             break;
         case IFLA_LINKINFO:
             /*
@@ -1333,6 +1341,7 @@ static void
 portd_interface_up_down(const char *interface_name, const char *status)
 {
     struct rtareq req;
+    bool selected = false;
 
     if (status == NULL || strcmp(status, PORTD_EMPTY_STRING) == 0) {
         VLOG_ERR("Invalid status argument");
@@ -1365,9 +1374,11 @@ portd_interface_up_down(const char *interface_name, const char *status)
     if (strcmp(status, "up") == 0) {
         req.i.ifi_change |= IFF_UP;
         req.i.ifi_flags  |= IFF_UP;
+        selected = true;
     } else if (strcmp(status, "down") == 0) {
         req.i.ifi_change |= IFF_UP;
         req.i.ifi_flags  &= ~IFF_UP;
+        selected = false;
     }
 
     /* Prepare unique identifier for message - one number for
@@ -1376,6 +1387,8 @@ portd_interface_up_down(const char *interface_name, const char *status)
     snprintf(id, PORTD_NL_ID_LEN, "up_down-%d", req.i.ifi_index);
 
     portd_send_netlink_msg(&req, req.n.nlmsg_len, req.n.nlmsg_seq, id);
+
+    portd_config_connected_route(interface_name, selected);
 
     return;
 }

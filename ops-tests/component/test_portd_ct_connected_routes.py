@@ -32,23 +32,24 @@ TOPOLOGY = """
 hs1:if01 -- sw1:if01
 """
 
-
 def test_portd_ct_connected_routes(topology, step):
     sw1 = topology.get("sw1")
     step('1-Test portd addition of the connected routes')
-    sw1("set interface 1 user_config:admin=up", shell='vsctl')
-    sw1("set interface 2 user_config:admin=up", shell='vsctl')
+    #sw1("set interface 1 user_config:admin=up", shell='vsctl')
+    #sw1("set interface 2 user_config:admin=up", shell='vsctl')
     # Configure switch sw1
     sw1("configure terminal")
     # Configure interface 1 on switch sw1
     sw1("interface 1")
     sw1("ip address 10.0.10.1/24")
     sw1("ipv6 address 2000::1/120")
+    sw1("no shutdown")
     sw1("exit")
     # Configure interface 2 on switch sw1
     sw1("interface 2")
     sw1("ip address 10.0.20.1/24")
     sw1("ipv6 address 2001::1/120")
+    sw1("no shutdown")
     sw1("exit")
     step('2-Verify connected routes are present in db')
     # Parse the "ovsdb-client dump" output and extract the lines between
