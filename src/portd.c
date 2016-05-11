@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 Hewlett-Packard Development Company, L.P.
+ * Copyright (C) 2015-2016 Hewlett-Packard Development Company, L.P.
  * All Rights Reserved.
  *
  *   Licensed under the Apache License, Version 2.0 (the "License"); you may
@@ -235,6 +235,9 @@ static bool portd_check_vlan_interface(char *port_name);
 
 int subintf_count;
 int lpbk_count;
+
+bool exiting;
+
 /*
  * Lookup port entry from DB
  */
@@ -252,6 +255,293 @@ portd_port_db_lookup(const char *name)
     }
     return NULL;
 }
+
+
+
+bool portd_send_netlink_msg(void* msg, int msg_len, int seq_no,
+        char *identifier);
+
+/*
+ * Portd Netlink send-with-retry parameters
+ * Tume the below values for number of retries
+ */
+#define NETLINK_RETRY_INTERVAL_MS 200
+#define MAX_NETLINK_RETRY_COUNT 20
+
+
+#define PORTD_NL_ID_LEN 100
+
+unsigned int portd_nl_seq_no = 1;
+extern long long int time_msec(void);
+
+pthread_mutex_t portd_nl_msg_q_mutex = PTHREAD_MUTEX_INITIALIZER;
+struct shash netlink_msgs = SHASH_INITIALIZER(&netlink_msgs);
+
+typedef struct PortdNetlinkQueue
+{
+    uint32_t seq_no;
+    uint32_t msg_size;
+    void     *message;
+    char     identifier[PORTD_NL_ID_LEN];
+    uint32_t retry_count;
+} PORT_NL_QUEUE_t;
+
+
+
+/**
+ * Function: portd_retry_messages
+ * Param:
+ *      void.
+ * Return:
+ *      void.
+ */
+static void
+portd_retry_messages()
+{
+    struct shash_node *node;
+
+    pthread_mutex_lock(&portd_nl_msg_q_mutex);
+    SHASH_FOR_EACH(node, &netlink_msgs)
+    {
+        PORT_NL_QUEUE_t *nl_data  = (PORT_NL_QUEUE_t*) node->data;
+        nl_data->retry_count++;
+
+        if(nl_data->retry_count > MAX_NETLINK_RETRY_COUNT)
+        {
+            VLOG_INFO("Max Retry: Message deleted from queue."
+                    " Seq no. %d, retry: %d",
+                    nl_data->seq_no, nl_data->retry_count);
+            shash_find_and_delete(&netlink_msgs, nl_data->identifier);
+            if (0 != nl_data->message)
+            {
+                free(nl_data->message);
+            }
+            free(nl_data);
+        }
+        else
+        {
+            VLOG_INFO("Sending message with sequence no: %d, retry: %d",
+                    nl_data->seq_no, nl_data->retry_count);
+
+            if (send(nl_sock, nl_data->message, nl_data->msg_size, 0) == -1)
+            {
+                VLOG_ERR("Netlink send failed for sequence no. %d (%s)",
+                        nl_data->seq_no, strerror(errno));
+            }
+        }
+    }
+    pthread_mutex_unlock(&portd_nl_msg_q_mutex);
+
+    return;
+}
+
+
+/**
+ * Function: portd_netlink_insert_message
+ * Param:
+ *      msg: The netlink message to be sent.
+ *      len: Length of the messgae.
+ *      seq_no: Sequence number of the messgae.
+ *      identifier: Identifier for a messgae type & ifindex pair.
+ * Return:
+ *      true  : Successfully added message to queue
+ *      false : Could not add to queue. Id already exists.
+ */
+static bool
+portd_netlink_insert_message(void *msg, int len, int seq_no, char *identifier)
+{
+
+    PORT_NL_QUEUE_t    *nl_data = NULL;
+    struct shash_node  *node    = NULL;
+    bool               retval   = false;
+
+    if (NULL == identifier)
+    {
+        char id[PORTD_NL_ID_LEN] = {0};
+        snprintf(id, PORTD_NL_ID_LEN, "%d", seq_no);
+        identifier = id;
+    }
+
+    pthread_mutex_lock(&portd_nl_msg_q_mutex);
+    SHASH_FOR_EACH(node, &netlink_msgs)
+    {
+        PORT_NL_QUEUE_t *nl_data  = (PORT_NL_QUEUE_t*) node->data;
+        /* sequence numbers must be unique */
+        if(nl_data->seq_no == seq_no)
+        {
+            VLOG_ERR("Message with seq no %d already exists", seq_no);
+            pthread_mutex_unlock(&portd_nl_msg_q_mutex);
+            return false;
+        }
+    }
+
+    nl_data = shash_find_data(&netlink_msgs, identifier);
+    if (NULL != nl_data )
+    {
+        /* Already a message exists with same identifier.
+           Over-write the old message with new */
+        shash_find_and_delete(&netlink_msgs, identifier);
+        if (0 != nl_data->message)
+        {
+            free(nl_data->message);
+        }
+        free(nl_data);
+
+        VLOG_INFO("Message with id %s already exists. Over-writing."
+                " New seq no. %d", identifier, seq_no);
+    }
+
+    /* allocate memory and copy message details */
+    nl_data = (PORT_NL_QUEUE_t*) malloc(sizeof(PORT_NL_QUEUE_t));
+    memset(nl_data, 0, sizeof(PORT_NL_QUEUE_t));
+
+    nl_data->message = (void*) malloc(len);
+    memset(nl_data->message, 0, len);
+
+    memcpy(nl_data->message, msg, len);
+    nl_data->msg_size = len;
+    strncpy(nl_data->identifier, identifier,
+            PORTD_NL_ID_LEN);
+    nl_data->seq_no = seq_no;
+
+    shash_add_once(&netlink_msgs, identifier, nl_data);
+    VLOG_DBG("Message with id %s, seq %d added to queue",
+            identifier, seq_no);
+    retval = true;
+
+    pthread_mutex_unlock(&portd_nl_msg_q_mutex);
+
+    return retval;
+}
+
+
+/**
+ * Function: portd_netlink_remove_message
+ * Param:
+ *      seq_no : the sequence number of message to remove from queue
+ * Return:
+ *      void
+ */
+static void
+portd_netlink_remove_message(int seq_no)
+{
+    struct shash_node *node;
+    bool is_msg_found = false;
+
+    pthread_mutex_lock(&portd_nl_msg_q_mutex);
+    SHASH_FOR_EACH(node, &netlink_msgs)
+    {
+        PORT_NL_QUEUE_t *nl_data  = (PORT_NL_QUEUE_t*) node->data;
+        if(nl_data && nl_data->seq_no == seq_no)
+        {
+            shash_find_and_delete(&netlink_msgs, nl_data->identifier);
+            if (0 != nl_data->message)
+            {
+                free(nl_data->message);
+            }
+            free(nl_data);
+
+            VLOG_DBG("Message with seq no. %d deleted from queue",
+                    seq_no);
+            is_msg_found = true;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&portd_nl_msg_q_mutex);
+
+    if (!is_msg_found)
+    {
+        VLOG_INFO("Message with seq no. %d not found in queue", seq_no);
+    }
+    return;
+}
+
+
+/**
+ * Function: portd_netlink_retry_thread_start
+ * Param:
+ *      arg
+ * Return:
+ *      void
+ */
+void *
+portd_netlink_retry_thread_start(void *arg)
+{
+    /* Detach thread to avoid memory leak upon exit. */
+    pthread_detach(pthread_self());
+
+    while (!exiting) {
+        poll_timer_wait_until(time_msec() +
+                NETLINK_RETRY_INTERVAL_MS);
+
+        if (exiting) {
+            poll_immediate_wake();
+        } else {
+            portd_retry_messages();
+            poll_block();
+        }
+
+    }
+    return NULL;
+}
+
+
+/**
+ * Function: portd_init_netlink_msg_retry
+ * Param:
+ *      void.
+ * Return:
+ *      ret: pthread_create return value.
+ */
+int
+portd_init_netlink_msg_retry()
+{
+
+    pthread_t portd_netlink_thread;
+
+    int  ret = pthread_create(&portd_netlink_thread,
+            (pthread_attr_t *)NULL,
+            portd_netlink_retry_thread_start,
+            NULL);
+    if (ret)
+    {
+        VLOG_ERR("Failed to create the netlink retry thread, error: %d", ret);
+    }
+    return ret;
+}
+
+
+
+/**
+ * Function: portd_send_netlink_msg
+ *      Function to add a message to portd_netlink queue, and retry
+ *      Unique sequence must be filled
+ *      NLM_F_ACK flag must be set on the message by caller.
+ *
+ * Param:
+ *      msg: The netlink message to be sent.
+ *      len: Length of the messgae.
+ *      seq_no: Sequence number of the messgae.
+ *      identifier: Identifier for a messgae type & ifindex pair.
+ *
+ * Return:
+ *      true  : Successfully added message to queue
+ *      false : Could not add to queue. Id already exists.
+ *
+ */
+bool
+portd_send_netlink_msg(void* msg, int msg_len, int seq_no, char *identifier)
+{
+    bool retval = portd_netlink_insert_message(msg, msg_len, seq_no,
+            identifier);
+    if (send(nl_sock, msg, msg_len, 0) == -1)
+    {
+        VLOG_ERR("Netlink send failed for sequence no. %d (%s)",
+                seq_no, strerror(errno));
+    }
+    return retval;
+}
+
 
 /**
  * Function: portd_interface_type_internal_check
@@ -434,6 +724,36 @@ portd_port_in_vrf_check(const char *port_name, const char *vrf_name)
 
     return false;
 }
+extern void retry_failed_msgs (struct nlmsghdr *h);
+
+
+/*
+ *
+ * This function processes the error & acknowledge messages
+ * for ACK messages, the message is removed from portd retry queue.
+ *
+ */
+static void
+parse_err_ack_msgs (struct nlmsghdr *h)
+{
+    struct nlmsgerr *err_msg;
+    err_msg = (struct nlmsgerr*) NLMSG_DATA(h);
+
+    /* err_msg->error 0 indicates message is an ACK message. */
+    if(0 == err_msg->error)
+    {
+        VLOG_INFO("Received Ack with seq no: %d", err_msg->msg.nlmsg_seq);
+
+        /* Need to remove the message from retry queue, if present */
+        if(0 != err_msg->msg.nlmsg_seq)
+        {
+            portd_netlink_remove_message(err_msg->msg.nlmsg_seq);
+        }
+    }
+
+   return;
+}
+
 
 /*
  * This function is used to parse the dump command response.
@@ -502,6 +822,11 @@ nl_msg_process(void *user_data, int sock, bool on_init)
             case NLMSG_DONE:
                 VLOG_DBG("End of multi part message");
                 multipart_msg_end = true;
+                break;
+
+            case NLMSG_ERROR:
+                /* Both Error & ACK messages */
+                parse_err_ack_msgs(nlh);
                 break;
 
             default:
@@ -1015,7 +1340,8 @@ portd_interface_up_down(const char *interface_name, const char *status)
     req.n.nlmsg_len = NLMSG_SPACE(sizeof(struct ifinfomsg));
     req.n.nlmsg_pid     = getpid();
     req.n.nlmsg_type    = RTM_NEWLINK;
-    req.n.nlmsg_flags   = NLM_F_REQUEST;
+    req.n.nlmsg_flags   = NLM_F_REQUEST | NLM_F_ACK;
+    req.n.nlmsg_seq     = portd_nl_seq_no++ ;
 
     req.i.ifi_family    = AF_UNSPEC;
     req.i.ifi_index     = if_nametoindex(interface_name);
@@ -1034,11 +1360,14 @@ portd_interface_up_down(const char *interface_name, const char *status)
         req.i.ifi_flags  &= ~IFF_UP;
     }
 
-    if (send(nl_sock, &req, req.n.nlmsg_len, 0) == -1) {
-        VLOG_ERR("Netlink failed to bring %s the interface %s", status,
-                 interface_name);
-        return;
-    }
+    /* Prepare unique identifier for message - one number for
+       a specific interface, specific message */
+    char id[PORTD_NL_ID_LEN] = {0};
+    snprintf(id, PORTD_NL_ID_LEN, "up_down-%d", req.i.ifi_index);
+
+    portd_send_netlink_msg(&req, req.n.nlmsg_len, req.n.nlmsg_seq, id);
+
+    return;
 }
 
 static int
@@ -3174,13 +3503,15 @@ portd_register_event_log(struct ovsrec_port *port_row,
    }
 }
 
+
+
 int
 main(int argc, char *argv[])
 {
     char *unixctl_path = NULL;
     struct unixctl_server *unixctl;
     char *remote;
-    bool exiting;
+
     int retval;
 
     set_program_name(argv[0]);
@@ -3209,6 +3540,10 @@ main(int argc, char *argv[])
      }
 
     exiting = false;
+
+    /* initialise portd-netlink retry thread */
+    portd_init_netlink_msg_retry();
+
     while (!exiting) {
         portd_run();
         unixctl_server_run(unixctl);
