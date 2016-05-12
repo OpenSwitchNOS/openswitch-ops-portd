@@ -76,6 +76,8 @@ COVERAGE_DEFINE(portd_reconfigure);
 #define MAX_ERR_STR_LEN 500
 #define IPV4_MAX_MASK_LENGTH 16
 #define MAX_LOOPBACK_CMD_LENGTH 128
+#define REM_BUF_LEN (buflen - 1 - strlen(buf))
+
 int nl_sock = -1; /* Netlink socket */
 int init_sock = -1; /* This sock will only be used during init */
 
@@ -3258,6 +3260,8 @@ portd_unixctl_dump(struct unixctl_conn *conn, int argc OVS_UNUSED,
                unixctl_command_reply(conn, buf);
                portd_dump(buf, BUF_LEN, "loopback");
                unixctl_command_reply(conn, buf);
+               portd_dump(buf, BUF_LEN, "l3port");
+               unixctl_command_reply(conn, buf);
                SAFE_FREE(buf);
        } else {
                snprintf(err_str,sizeof(err_str),
@@ -3274,6 +3278,71 @@ portd_dump(char* buf, int buflen, const char* feature)
        snprintf(buf, buflen, "Number of Configured sub-interfaces are : %d.", subintf_count);
     else if (strcmp(feature, "loopback") == 0)
        snprintf(buf, buflen, "Number of Configured loopback interfaces are : %d.", lpbk_count);
+    else if (strcmp(feature, "l3port") == 0)
+    {
+        int i = 0;
+        struct shash_node *sh_node;
+        char temp[100];
+        strcpy(buf, "\n");
+        SHASH_FOR_EACH(sh_node, &all_ports)
+        {
+            const struct ovsrec_port  *ovs_port;
+            sprintf(temp, "Port name :  %s\n", sh_node->name);
+            strncat(buf, temp, REM_BUF_LEN);
+            struct port_lag_data *portld = sh_node->data;
+            ovs_port = portld->cfg;
+
+            /* admin -----*/
+            if (ovs_port->admin)
+            {
+                sprintf(temp, "Admin :  %s\n", ovs_port->admin);
+                strncat(buf, temp, REM_BUF_LEN);
+            }
+
+            /* IPv4 address -----*/
+            if (ovs_port->ip4_address)
+            {
+                sprintf(temp, "IPv4 Address : %s\n", ovs_port->ip4_address);
+                strncat(buf, temp, REM_BUF_LEN);
+            }
+            if (ovs_port->n_ip4_address_secondary)
+            {
+                strncat(buf, "IPv4 Secondary Address : \n", REM_BUF_LEN);
+                for (i = 0; i < ovs_port->n_ip4_address_secondary; i++)
+                {
+                    sprintf(temp, "\t - %s\n",
+                                ovs_port->ip4_address_secondary[i]);
+                    strncat(buf, temp, REM_BUF_LEN);
+                }
+            }
+
+            /* IPv6 address -----*/
+            if (ovs_port->ip6_address)
+            {
+                sprintf(temp, "IPv6 Address : %s\n", ovs_port->ip6_address);
+                strncat(buf, temp, REM_BUF_LEN);
+            }
+            if (ovs_port->n_ip6_address_secondary)
+            {
+                strncat(buf, "IPv6 Secondary Address : \n", REM_BUF_LEN);
+                for (i = 0; i < ovs_port->n_ip6_address_secondary; i++)
+                {
+                    sprintf(temp, "\t - %s\n",
+                                ovs_port->ip6_address_secondary[i]);
+                    strncat(buf, temp, REM_BUF_LEN);
+                }
+            }
+
+            /* MAC address -----*/
+            if (ovs_port->mac)
+            {
+                sprintf(temp, "MAC Address :  %s\n", ovs_port->mac);
+                strncat(buf, temp, REM_BUF_LEN);
+            }
+
+            strncat(buf, "\n\n", REM_BUF_LEN);
+        }
+    }
 }
 
 static void
