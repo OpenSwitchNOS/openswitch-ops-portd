@@ -51,7 +51,7 @@ def execute_command_and_verify_response(switch, command, max_try=1,
             LogOutput('debug', "Passed verify string after "
                       + str(i) + " retries.")
     else:
-        LogOutput('info', "Failed verify string after "
+        LogOutput('debug', "Failed verify string after "
                   + str(max_try) + " retries.\nBuffer:\n" + bufferout)
 
     return passed
@@ -132,6 +132,11 @@ def portd_functionality_tc1(**kwargs):
         "### Verifying internal VLANs assigned to interfaces in the kernel ###"
     )
     command = "ip netns exec swns ip addr show 1"
+    execute_command_and_verify_response(
+        switch=switch,
+        command=command,
+        max_try=10,
+        str1="inet")
     returnStructure = switch.DeviceInteract(command=command)
     bufferout = returnStructure.get('buffer')
     out = bufferout.split()
@@ -139,6 +144,11 @@ def portd_functionality_tc1(**kwargs):
     assert '10.1.1.1/8' in out[indexval + 1], "Cannot verify kernel \
             ip address on interface %d" % intf1
     command = "ip netns exec swns ip addr show 2"
+    execute_command_and_verify_response(
+        switch=switch,
+        command=command,
+        max_try=10,
+        str1="inet")
     returnStructure = switch.DeviceInteract(command=command)
     bufferout = returnStructure.get('buffer')
     out = bufferout.split()
@@ -181,6 +191,11 @@ def portd_functionality_tc2(**kwargs):
         "### Verifying default internal VLAN assigned to interface 3"
         " in the DB ###")
     command = "ovs-vsctl get port 3 hw_config:internal_vlan_id"
+    execute_command_and_verify_response(
+        switch=switch,
+        command=command,
+        max_try=10,
+        str1="1024")
     returnStructure = switch.DeviceInteract(command=command)
     bufferout = returnStructure.get('buffer')
     assert '"1024"' in bufferout, "Unable to verify internal VLAN for \
@@ -190,6 +205,11 @@ def portd_functionality_tc2(**kwargs):
         "### Verifying default internal VLAN assigned to interface 3"
         " in the kernel ###")
     command = "ip netns exec swns ip addr show 3"
+    execute_command_and_verify_response(
+        switch=switch,
+        command=command,
+        max_try=10,
+        str1="inet")
     returnStructure = switch.DeviceInteract(command=command)
     bufferout = returnStructure.get('buffer')
     out = bufferout.split()
@@ -235,6 +255,11 @@ def portd_functionality_tc3(**kwargs):
         'info',
         "### Verifying internal VLAN assigned to interface 4 in the DB ###")
     command = "ovs-vsctl get port 4 hw_config:internal_vlan_id"
+    execute_command_and_verify_response(
+        switch=switch,
+        command=command,
+        max_try=10,
+        str1="4000")
     returnStructure = switch.DeviceInteract(command=command)
     bufferout = returnStructure.get('buffer')
     assert '"4000"' in bufferout, "Unable to verify internal VLAN range for \
@@ -244,6 +269,11 @@ def portd_functionality_tc3(**kwargs):
         "### Verifying internal VLAN assigned to interface 4 in the kernel ###"
     )
     command = "ip netns exec swns ip addr show 4"
+    execute_command_and_verify_response(
+        switch=switch,
+        command=command,
+        max_try=10,
+        str1="inet")
     returnStructure = switch.DeviceInteract(command=command)
     bufferout = returnStructure.get('buffer')
     out = bufferout.split()
@@ -315,8 +345,16 @@ def portd_functionality_tc4(**kwargs):
     bufferout = returnStructure.buffer()
     assert retCode == 0, "Cannot configure ip address on interface %d" % intf1
     LogOutput('info', "### Trying to assign L2 VLAN500 which should fail ###")
-    returnStructure = AddVlan(deviceObj=switch, vlanId=500, config=True)
-    bufferout = returnStructure.buffer()
+    count = 0
+    while (count < 9):
+        returnStructure = AddVlan(deviceObj=switch, vlanId=500, config=True)
+        bufferout = returnStructure.buffer()
+        count  = count + 1
+        if "VLAN500 is used as an internal VLAN. No further configuration" \
+        " allowed" in bufferout:
+            break
+        else:
+            sleep(1)
     retCode = returnStructure.returnCode()
     assert retCode == 0, "Able to configure L2 VLAN500"
     assert "VLAN500 is used as an internal VLAN. No further configuration" \
@@ -348,6 +386,11 @@ def portd_functionality_tc4(**kwargs):
     assert retCode == 0, "Unable to assign L2 VLAN even though internal VLAN \
             was absent"
     command = "ovs-vsctl get vlan VLAN500 name"
+    execute_command_and_verify_response(
+        switch=switch,
+        command=command,
+        max_try=10,
+        str1="VLAN500")
     returnStructure = switch.DeviceInteract(command=command)
     retCode = returnStructure.get('returnCode')
     bufferout = returnStructure.get('buffer')
@@ -431,6 +474,11 @@ def portd_functionality_tc5(**kwargs):
         'info',
         "### Verifying internal VLAN assigned to interface 1 in the DB ###")
     command = "ovs-vsctl get port 1 hw_config:internal_vlan_id"
+    execute_command_and_verify_response(
+        switch=switch,
+        command=command,
+        max_try=10,
+        str1="1002")
     returnStructure = switch.DeviceInteract(command=command)
     bufferout = returnStructure.get('buffer')
     assert '"1002"' in bufferout, "Unable to verify internal VLAN for \
@@ -468,6 +516,11 @@ def portd_functionality_tc5(**kwargs):
         'info',
         "### Verifying internal VLAN assigned to interface 2 in the DB ###")
     command = "ovs-vsctl get port 2 hw_config:internal_vlan_id"
+    execute_command_and_verify_response(
+        switch=switch,
+        command=command,
+        max_try=10,
+        str1="1001")
     returnStructure = switch.DeviceInteract(command=command)
     bufferout = returnStructure.get('buffer')
     assert '"1001"' in bufferout, "Unable to verify internal VLAN for \
