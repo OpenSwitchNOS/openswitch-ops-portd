@@ -3211,7 +3211,7 @@ portd_unixctl_dump(struct unixctl_conn *conn, int argc OVS_UNUSED,
        char err_str[MAX_ERR_STR_LEN];
        char *buf = xcalloc(1, BUF_LEN);
        if (buf){
-               portd_dump(buf, BUF_LEN, "sub-interface");
+               portd_dump(buf, BUF_LEN, "subinterface");
                unixctl_command_reply(conn, buf);
                portd_dump(buf, BUF_LEN, "loopback");
                unixctl_command_reply(conn, buf);
