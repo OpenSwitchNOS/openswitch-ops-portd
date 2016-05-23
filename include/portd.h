@@ -62,6 +62,9 @@
         ((strlen((s1)) == strlen((s2))) && \
         (!strncmp((s1), (s2), strlen((s2)))))
 
+#define SAFE_FREE(x) \
+        if (x) {free(x);x = NULL;};
+
 /* Port configuration */
 struct port {
     struct hmap_node port_node; /* Element in struct vrf's "ports" hmap. */
