@@ -546,6 +546,7 @@ portd_add_vlan_interface(const char *interface_name,
                          const unsigned short vlan_tag)
 {
     int ifindex;
+    int i;
 
     struct {
         struct nlmsghdr  n;
@@ -563,6 +564,17 @@ portd_add_vlan_interface(const char *interface_name,
 
     req.i.ifi_family    = AF_UNSPEC;
     ifindex             = if_nametoindex(interface_name);
+
+    /*
+     * Prior to creation of vlan interfaces we need the DEFAULT_BRIDGE_NAME
+     * (i.e bridge_normal) interface to be created in kernel. This has to be
+     * changed when we have multiple bridges. Then the corresponding bridge
+     * has to be selected for that vlan interface creation.
+     */
+    for (i = 0; (ifindex == 0 && i<BRIDGE_INT_MAX_RETRY); i++) {
+        sleep(1);
+        ifindex = if_nametoindex(interface_name);
+    }
 
     if (ifindex == 0) {
         VLOG_ERR("Unable to get ifindex for interface: %s", interface_name);

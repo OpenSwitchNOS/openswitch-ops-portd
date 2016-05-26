@@ -64,6 +64,7 @@
 
 #define SAFE_FREE(x) \
         if (x) {free(x);x = NULL;};
+#define BRIDGE_INT_MAX_RETRY 5
 
 /* Port configuration */
 struct port {
