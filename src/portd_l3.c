@@ -89,12 +89,12 @@ void
 portd_config_iprouting(int enable)
 {
     int fd = -1, nbytes = 0;
-    char buf[16];
+    char buf[4];
     const char *ipv4_path = "/proc/sys/net/ipv4/ip_forward";
     const char *ipv6_path = "/proc/sys/net/ipv6/conf/all/forwarding";
     const char *icmp_bcast = "/proc/sys/net/ipv4/icmp_echo_ignore_broadcasts";
 
-    nbytes = sprintf(buf, "%d", enable);
+    nbytes = snprintf(buf,2, "%d", enable);
 
     if ((fd = open(ipv4_path, O_WRONLY)) == -1) {
         VLOG_ERR("Unable to open %s (%s)", ipv4_path, strerror(errno));
@@ -124,7 +124,7 @@ portd_config_iprouting(int enable)
      * Changing value to zero to allow broadcast ping
      * when routing is enabled.
      */
-    nbytes = sprintf(buf, "%d", !enable);
+    nbytes = snprintf(buf, 2,"%d", !enable);
     if ((fd = open(icmp_bcast, O_WRONLY)) == -1) {
         VLOG_ERR("Unable to open %s (%s)", icmp_bcast, strerror(errno));
         return;
@@ -1330,7 +1330,10 @@ add_link_attr(struct nlmsghdr *n, int nlmsg_maxlen,
     rta = NLMSG_TAIL(n);
     rta->rta_type = attr_type;
     rta->rta_len = len;
+
+    if(payload_len > 0)
     memcpy(RTA_DATA(rta), payload, payload_len);
+
     n->nlmsg_len = NLMSG_ALIGN(n->nlmsg_len) + RTA_ALIGN(len);
     return 0;
 }
