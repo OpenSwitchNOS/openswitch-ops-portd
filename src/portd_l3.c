@@ -1157,7 +1157,7 @@ portd_ip6_addr_find(struct port *cfg, const char *address)
 
     HMAP_FOR_EACH_WITH_HASH (addr, addr_node, hash_string(address, 0),
                              &cfg->secondary_ip6addr) {
-        if (!strcmp(addr->address, address)) {
+        if (addr && !strcmp(addr->address, address)) {
             return addr;
         }
     }
@@ -1172,7 +1172,7 @@ portd_ip4_addr_find(struct port *cfg, const char *address)
 
     HMAP_FOR_EACH_WITH_HASH (addr, addr_node, hash_string(address, 0),
                              &cfg->secondary_ip4addr) {
-        if (!strcmp(addr->address, address)) {
+        if (addr && !strcmp(addr->address, address)) {
             return addr;
         }
     }
@@ -1192,14 +1192,14 @@ portd_find_ip_addr_kernel(struct kernel_port *port,
     if (ipv6) {
         HMAP_FOR_EACH_WITH_HASH (addr, addr_node, hash_string(address, 0),
                                      &port->ip6addr) {
-            if (!strcmp(addr->address, address)) {
+            if (addr && !strcmp(addr->address, address)) {
                 return true;
             }
         }
     } else {
         HMAP_FOR_EACH_WITH_HASH (addr, addr_node, hash_string(address, 0),
                                      &port->ip4addr) {
-            if (!strcmp(addr->address, address)) {
+            if (addr && !strcmp(addr->address, address)) {
                 return true;
             }
         }
@@ -1222,7 +1222,7 @@ portd_find_ip_addr_db(struct port *port, const char *address, bool ipv6)
         }
         HMAP_FOR_EACH_WITH_HASH (addr, addr_node, hash_string(address, 0),
                                      &port->secondary_ip6addr) {
-            if (!strcmp(addr->address, address)) {
+            if (addr && !strcmp(addr->address, address)) {
                 return true;
             }
         }
@@ -1232,7 +1232,7 @@ portd_find_ip_addr_db(struct port *port, const char *address, bool ipv6)
         }
         HMAP_FOR_EACH_WITH_HASH (addr, addr_node, hash_string(address, 0),
                                      &port->secondary_ip4addr) {
-            if (!strcmp(addr->address, address)) {
+            if (addr && !strcmp(addr->address, address)) {
                 return true;
             }
         }
@@ -1476,7 +1476,7 @@ portd_kernel_ip_addr_lookup(struct kernel_port *kernel_port,
             /*
              * Match the IPv6 address in the existing hash map
              */
-            if (addr->address && (strcmp(addr->address, ip_address) == 0)) {
+            if (addr && addr->address && (strcmp(addr->address, ip_address) == 0)) {
                 return true;
             }
         }
@@ -1486,7 +1486,7 @@ portd_kernel_ip_addr_lookup(struct kernel_port *kernel_port,
             /*
              * Match the IPv4 address in the existing hash map
              */
-            if (addr->address && (strcmp(addr->address, ip_address) == 0)) {
+            if (addr && addr->address && (strcmp(addr->address, ip_address) == 0)) {
                 return true;
             }
         }

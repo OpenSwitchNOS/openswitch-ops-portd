@@ -307,6 +307,8 @@ portd_retry_messages()
     pthread_mutex_lock(&portd_nl_msg_q_mutex);
     SHASH_FOR_EACH(node, &netlink_msgs)
     {
+        if(!node)
+           return;
         PORT_NL_QUEUE_t *nl_data  = (PORT_NL_QUEUE_t*) node->data;
         nl_data->retry_count++;
 
@@ -1967,7 +1969,7 @@ portd_handle_interface_config_mods(void)
 
                 /* For each vrf in all_vrfs, update the port list */
                 HMAP_FOR_EACH (vrf, node, &all_vrfs) {
-                    VLOG_DBG("vrf %s to search port %s\n", vrf->name,
+                    VLOG_DBG("vrf %s to search port %s\n", vrf ? vrf->name:"\0" ,
                              port_row->name);
                     port = portd_port_lookup(vrf, port_row->name);
                     if (port) {
@@ -3300,6 +3302,7 @@ portd_dump(char* buf, int buflen, const char* feature)
         strcpy(buf, "\n");
         SHASH_FOR_EACH(sh_node, &all_ports)
         {
+            if(sh_node){
             const struct ovsrec_port  *ovs_port;
             sprintf(temp, "Port name :  %s\n", sh_node->name);
             strncat(buf, temp, REM_BUF_LEN);
@@ -3355,6 +3358,7 @@ portd_dump(char* buf, int buflen, const char* feature)
             }
 
             strncat(buf, "\n\n", REM_BUF_LEN);
+            }
         }
     }
 }
