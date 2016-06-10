@@ -314,7 +314,7 @@ portd_retry_messages()
 
         if(nl_data->retry_count > MAX_NETLINK_RETRY_COUNT)
         {
-            VLOG_INFO("Max Retry: Message deleted from queue."
+            VLOG_ERR("Max Retry: Message deleted from queue."
                     " Seq no. %d, retry: %d",
                     nl_data->seq_no, nl_data->retry_count);
             shash_find_and_delete(&netlink_msgs, nl_data->identifier);
@@ -326,7 +326,7 @@ portd_retry_messages()
         }
         else
         {
-            VLOG_INFO("Sending message with sequence no: %d, retry: %d",
+            VLOG_DBG("Sending message with sequence no: %d, retry: %d",
                     nl_data->seq_no, nl_data->retry_count);
 
             if (send(nl_sock, nl_data->message, nl_data->msg_size, 0) == -1)
@@ -393,7 +393,7 @@ portd_netlink_insert_message(void *msg, int len, int seq_no, char *identifier)
         }
         free(nl_data);
 
-        VLOG_INFO("Message with id %s already exists. Over-writing."
+        VLOG_DBG("Message with id %s already exists. Over-writing."
                 " New seq no. %d", identifier, seq_no);
     }
 
@@ -457,7 +457,7 @@ portd_netlink_remove_message(int seq_no)
 
     if (!is_msg_found)
     {
-        VLOG_INFO("Message with seq no. %d not found in queue", seq_no);
+        VLOG_DBG("Message with seq no. %d not found in queue", seq_no);
     }
     return;
 }
@@ -748,7 +748,7 @@ parse_err_ack_msgs (struct nlmsghdr *h)
     /* err_msg->error 0 indicates message is an ACK message. */
     if(0 == err_msg->error)
     {
-        VLOG_INFO("Received Ack with seq no: %d", err_msg->msg.nlmsg_seq);
+        VLOG_DBG("Received Ack with seq no: %d", err_msg->msg.nlmsg_seq);
 
         /* Need to remove the message from retry queue, if present */
         if(0 != err_msg->msg.nlmsg_seq)
@@ -2965,6 +2965,8 @@ portd_kernel_if_sync_check_on_init (void)
 {
     struct shash kernel_port_list;
     const struct ovsrec_interface *intf_row;
+    struct kernel_port *kernel_port;
+    struct shash_node *node, *next;
     unsigned int wait_for_kernel_if_sync;
 
     shash_init (&kernel_port_list);
@@ -2981,8 +2983,16 @@ portd_kernel_if_sync_check_on_init (void)
         }
     }
 
-    VLOG_DBG ("%u interfaces are yet be created in the kernel", wait_for_kernel_if_sync);
+    SHASH_FOR_EACH_SAFE (node, next, &kernel_port_list) {
+        kernel_port = node->data;
+        hmap_destroy(&kernel_port->ip4addr);
+        hmap_destroy(&kernel_port->ip6addr);
+        SAFE_FREE(kernel_port->name);
+        SAFE_FREE(kernel_port);
+    }
+    shash_destroy(&kernel_port_list);
 
+    VLOG_DBG ("%u interfaces are yet be created in the kernel", wait_for_kernel_if_sync);
     return wait_for_kernel_if_sync;
 }
 
@@ -3131,6 +3141,7 @@ portd_reconfigure(void)
         portd_netlink_socket_open(&init_sock, true);
         if (portd_kernel_if_sync_check_on_init()) {
             VLOG_DBG ("kernel if NOT in sync - returning!!");
+            sleep(1);
             return;
         }
         portd_vlan_config_on_init();

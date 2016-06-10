@@ -80,6 +80,7 @@ class adminstateupdateCTTest( OpsVsiTest ):
         info('##### Verify the port is down by'\
              ' default ####\n')
         cmd = "/usr/bin/ovs-vsctl get port %s hw_config" % first_interface
+        time.sleep(2)
         output = s1.ovscmd(cmd)
         assert port_down in output, 'Incorrect port default state'
         info('### Default state of port is down as expected ###\n');
