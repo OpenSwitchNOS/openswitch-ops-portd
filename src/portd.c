@@ -1168,32 +1168,6 @@ portd_init(const char *remote)
     ovsdb_idl_add_column(idl, &ovsrec_vlan_col_internal_usage);
     ovsdb_idl_omit_alert(idl, &ovsrec_vlan_col_internal_usage);
 
-    /*
-     * This daemon is also responsible for adding routes for
-     * directly connected subnets.
-     */
-    ovsdb_idl_add_table(idl, &ovsrec_table_nexthop);
-    ovsdb_idl_add_column(idl, &ovsrec_nexthop_col_ports);
-    ovsdb_idl_omit_alert(idl, &ovsrec_nexthop_col_ports);
-
-    ovsdb_idl_add_table(idl, &ovsrec_table_route);
-    ovsdb_idl_add_column(idl, &ovsrec_route_col_prefix);
-    ovsdb_idl_omit_alert(idl, &ovsrec_route_col_prefix);
-    ovsdb_idl_add_column(idl, &ovsrec_route_col_from);
-    ovsdb_idl_omit_alert(idl, &ovsrec_route_col_from);
-    ovsdb_idl_add_column(idl, &ovsrec_route_col_nexthops);
-    ovsdb_idl_omit_alert(idl, &ovsrec_route_col_nexthops);
-    ovsdb_idl_add_column(idl, &ovsrec_route_col_address_family);
-    ovsdb_idl_omit_alert(idl, &ovsrec_route_col_address_family);
-    ovsdb_idl_add_column(idl, &ovsrec_route_col_sub_address_family);
-    ovsdb_idl_omit_alert(idl, &ovsrec_route_col_sub_address_family);
-    ovsdb_idl_add_column(idl, &ovsrec_route_col_distance);
-    ovsdb_idl_omit_alert(idl, &ovsrec_route_col_distance);
-    ovsdb_idl_add_column(idl, &ovsrec_route_col_vrf);
-    ovsdb_idl_omit_alert(idl, &ovsrec_route_col_vrf);
-    ovsdb_idl_add_column(idl, &ovsrec_route_col_selected);
-    ovsdb_idl_omit_alert(idl, &ovsrec_route_col_selected);
-
     INIT_DIAG_DUMP_BASIC(portd_diag_dump_basic_subif_lpbk);
     unixctl_command_register("portd/dump", "", 0, 0,
                              portd_unixctl_dump, NULL);
@@ -1343,7 +1317,6 @@ static void
 portd_interface_up_down(const char *interface_name, const char *status)
 {
     struct rtareq req;
-    bool selected = false;
 
     if (status == NULL || strcmp(status, PORTD_EMPTY_STRING) == 0) {
         VLOG_ERR("Invalid status argument");
@@ -1376,11 +1349,9 @@ portd_interface_up_down(const char *interface_name, const char *status)
     if (strcmp(status, "up") == 0) {
         req.i.ifi_change |= IFF_UP;
         req.i.ifi_flags  |= IFF_UP;
-        selected = true;
     } else if (strcmp(status, "down") == 0) {
         req.i.ifi_change |= IFF_UP;
         req.i.ifi_flags  &= ~IFF_UP;
-        selected = false;
     }
 
     /* Prepare unique identifier for message - one number for
@@ -1389,8 +1360,6 @@ portd_interface_up_down(const char *interface_name, const char *status)
     snprintf(id, PORTD_NL_ID_LEN, "up_down-%d", req.i.ifi_index);
 
     portd_send_netlink_msg(&req, req.n.nlmsg_len, req.n.nlmsg_seq, id);
-
-    portd_config_connected_route(interface_name, selected);
 
     return;
 }

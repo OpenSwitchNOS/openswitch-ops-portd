@@ -199,7 +199,6 @@ void portd_config_iprouting(int enable);
 void portd_reconfig_ipaddr(struct port *port, struct ovsrec_port *port_row);
 void portd_del_ipaddr(struct port *port);
 void portd_ipaddr_config_on_init(void);
-void portd_config_connected_route(const char *interface_name, bool selected);
 
 /* Inter-VLAN functions */
 void portd_add_vlan_interface(const char *parent_intf_name,

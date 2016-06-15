@@ -19,7 +19,8 @@ from opsvsi.docker import *
 from opsvsi.opsvsitest import *
 
 vlan_interface = "vlan10"
-
+PORTD_INIT_SLEEP_TIME = 15
+PORTD_TEST_SLEEP_TIME = 5
 
 class Inter_VLAN_Interface_CT(OpsVsiTest):
 
@@ -39,9 +40,12 @@ class Inter_VLAN_Interface_CT(OpsVsiTest):
         s1 = self.net.switches[0]
 
         s1.cmdCLI("configure terminal")
+        s1.cmdCLI("vlan 10")
+        s1.cmdCLI("no shutdown")
 
         info('### CHECK: inter-VLAN interface creation. ###\n')
         s1.cmdCLI("interface " + vlan_interface)
+        time.sleep(PORTD_TEST_SLEEP_TIME)
         s1.cmd("ip netns exec swns bash")
         ret = s1.cmd("ifconfig -a " + vlan_interface)
         assert 'vlan10' in ret, \
@@ -50,7 +54,7 @@ class Inter_VLAN_Interface_CT(OpsVsiTest):
 
         info('### CHECK: IPv4 address add to inter-VLAN interface. ###\n\n')
         s1.cmdCLI("ip address 192.168.0.1/30")
-        time.sleep(2)
+        time.sleep(PORTD_TEST_SLEEP_TIME)
         ret = s1.cmd("ip addr show " + vlan_interface)
         assert '192.168.0.1' in ret, \
             'FAIL: test to add IPv4 address to inter-VLAN interface failed.'
@@ -59,7 +63,7 @@ class Inter_VLAN_Interface_CT(OpsVsiTest):
         info('### CHECK: IPv4 address delete from '
              'inter-VLAN interface. ###\n\n')
         s1.cmdCLI("no ip address 192.168.0.1/30")
-        time.sleep(2)
+        time.sleep(PORTD_TEST_SLEEP_TIME)
         ret = s1.cmd("ip addr show " + vlan_interface)
         assert '192.168.0.1' not in ret, \
             'FAIL: test to add IPv4 address to inter-VLAN interface failed.'
@@ -67,7 +71,7 @@ class Inter_VLAN_Interface_CT(OpsVsiTest):
 
         info('### CHECK: IPv6 address add to inter-VLAN interface. ###\n\n')
         s1.cmdCLI("ipv6 address 2000::1/120")
-        time.sleep(2)
+        time.sleep(PORTD_TEST_SLEEP_TIME)
         ret = s1.cmd("ip addr show  " + vlan_interface)
         assert '2000::1' in ret, \
             'FAIL: test to add IPv6 address to inter-VLAN interface failed.'
@@ -76,7 +80,7 @@ class Inter_VLAN_Interface_CT(OpsVsiTest):
         info('### CHECK: IPv6 address delete to '
              'inter-VLAN interface. ###\n\n')
         s1.cmdCLI("no ipv6 address 2000::1/120")
-        time.sleep(2)
+        time.sleep(PORTD_TEST_SLEEP_TIME)
         ret = s1.cmd("ip addr show  " + vlan_interface)
         assert '2000::1' not in ret, \
             'FAIL: test to add IPv6 address to inter-VLAN interface failed.'
@@ -87,6 +91,7 @@ class Inter_VLAN_Interface_CT(OpsVsiTest):
         s1.cmdCLI("exit")
         s1.cmdCLI("no interface " + vlan_interface)
         s1.cmd("ip netns exec swns bash")
+        time.sleep(PORTD_TEST_SLEEP_TIME)
         ret = s1.cmd("ifconfig -a " + vlan_interface)
         assert 'does not exist' in ret, \
             'FAIL: inter-VLAN interface deletion test failed.'
@@ -110,6 +115,7 @@ class Test_portd_intervlan_interface:
         Test_portd_intervlan_interface.test.net.stop()
 
     def test_intervlan_interface(self):
+        time.sleep(PORTD_INIT_SLEEP_TIME)
         self.test.test_intervlan_interface()
 
     def __del__(self):
