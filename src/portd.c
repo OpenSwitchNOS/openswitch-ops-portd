@@ -2286,8 +2286,12 @@ portd_add_internal_vlan(struct port *port, struct ovsrec_port *port_row)
     if (vid == -1) {
         VLOG_ERR("Error allocating internal vlan for port '%s'", port_row->name);
         portd_set_status_error(port_row, PORT_STATUS_MAP_ERROR_NO_INTERNAL_VLAN);
+        log_event("INTERNAL_VLAN_ALLOCATION_ERR",
+                  EV_KV("port", "%s", port_row->name));
         return;
     }
+    log_event("INTERNAL_VLAN_ALLOCATION", EV_KV("vid", "%d", vid),
+              EV_KV("port", "%s", port_row->name));
 
     portd_create_vlan_row(vid, port_row);
     port->internal_vid = vid;
@@ -3666,10 +3670,18 @@ main(int argc, char *argv[])
     daemonize_complete();
     vlog_enable_async();
     retval = event_log_init("SUBINTERFACE");
+    if(retval < 0) {
+         VLOG_ERR("Event log initialization failed for subinterface");
+    }
     retval = event_log_init("LOOPBACK");
     if(retval < 0) {
-         VLOG_ERR("Event log initialization failed");
-     }
+         VLOG_ERR("Event log initialization failed for loopback");
+    }
+    sleep(2);
+    retval = event_log_init("VLAN");
+    if(retval < 0) {
+         VLOG_ERR("Event log initialization failed for vlan");
+    }
 
     exiting = false;
 
