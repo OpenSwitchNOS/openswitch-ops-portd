@@ -27,6 +27,7 @@
 #include "shash.h"
 #include "vswitch-idl.h"
 #include "openswitch-idl.h"
+#include "ops-utils.h"
 
 #define PORTD_DISABLE_ROUTING 0
 #define PORTD_ENABLE_ROUTING 1
