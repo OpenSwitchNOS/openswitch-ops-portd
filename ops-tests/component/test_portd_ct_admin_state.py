@@ -16,6 +16,8 @@
 # Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 # 02111-1307, USA.
 
+from pytest import mark
+
 
 TOPOLOGY = """
 # +-------+
@@ -33,6 +35,7 @@ hsw1:if01 -- sw1:if01
 """
 
 
+@mark.gate
 def test_portd_ct_admin_state(topology, step):
     first_interface = "1"
     port_down = 'enable="false"'

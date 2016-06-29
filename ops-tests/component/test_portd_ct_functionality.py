@@ -17,6 +17,7 @@
 # 02111-1307, USA.
 
 from re import search
+from pytest import mark
 from time import sleep
 
 TOPOLOGY = """
@@ -347,6 +348,7 @@ def portd_functionality_tc7(sw1, step):
     assert mtu == mtu_valid
 
 
+@mark.gate
 def test_portd_ct_functionality(topology, step):
     sw1 = topology.get("sw1")
     assert sw1 is not None

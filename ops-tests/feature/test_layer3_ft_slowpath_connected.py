@@ -35,6 +35,7 @@ ops1:if02 -- hs2:eth0
 """
 
 
+@mark.gate
 @mark.timeout(500)
 def test_slow_routing_direct_connected(topology, step):
     """

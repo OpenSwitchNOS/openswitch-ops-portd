@@ -93,6 +93,7 @@ def verify_l3_stats(switch, iface, base_stats, ping_cnt):
         "tx_bytes wrong.")
 
 
+@mark.gate
 @mark.timeout(1000)
 @mark.platform_incompatible(['docker'])
 def test_intervlan_routing(topology, step):

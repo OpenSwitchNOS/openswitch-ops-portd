@@ -16,6 +16,7 @@
 # Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 # 02111-1307, USA.
 
+from pytest import mark
 
 TOPOLOGY = """
 # +-------+
@@ -33,6 +34,7 @@ hs1:if01 -- sw1:if01
 """
 
 
+@mark.gate
 def test_portd_ct_inter_vlan_interface(topology, step):
     sw1 = topology.get("sw1")
     assert sw1 is not None
