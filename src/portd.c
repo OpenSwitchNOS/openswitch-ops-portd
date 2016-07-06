@@ -262,18 +262,18 @@ portd_port_db_lookup(const char *name)
 
 
 
-bool portd_send_netlink_msg(void* msg, int msg_len, int seq_no,
+bool portd_send_netlink_msg(void* msg, uint32_t msg_len, uint32_t seq_no,
         char *identifier);
 
 /*
  * Portd Netlink send-with-retry parameters
  * Tume the below values for number of retries
  */
-#define NETLINK_RETRY_INTERVAL_MS 200
-#define MAX_NETLINK_RETRY_COUNT 20
-
-
-#define PORTD_NL_ID_LEN 100
+#define NETLINK_RETRY_INTERVAL_MS 32
+#define MAX_NETLINK_RETRY_COUNT 256
+#define MAX_COUNT_PER_RETRY 32
+#define RETRY_COUNT_DIVIDER 4
+#define PORTD_NL_ID_LEN 32
 
 unsigned int portd_nl_seq_no = 1;
 extern long long int time_msec(void);
@@ -288,9 +288,14 @@ typedef struct PortdNetlinkQueue
     void     *message;
     char     identifier[PORTD_NL_ID_LEN];
     uint32_t retry_count;
+    uint32_t flags;
+/* flags */
+#define DO_RETRY (1<<0)
 } PORT_NL_QUEUE_t;
 
-
+#define CHECK_FLAG(v,f)    ((v)&(f))
+#define SET_FLAG(v,f)      ((v)|=(f))
+#define UNSET_FLAG(v,f)    ((v)&=~(f))
 
 /**
  * Function: portd_retry_messages
@@ -303,6 +308,7 @@ static void
 portd_retry_messages()
 {
     struct shash_node *node;
+    uint32_t counter = MAX_COUNT_PER_RETRY;
 
     pthread_mutex_lock(&portd_nl_msg_q_mutex);
     SHASH_FOR_EACH(node, &netlink_msgs)
@@ -310,30 +316,51 @@ portd_retry_messages()
         if(!node)
            return;
         PORT_NL_QUEUE_t *nl_data  = (PORT_NL_QUEUE_t*) node->data;
-        nl_data->retry_count++;
 
-        if(nl_data->retry_count > MAX_NETLINK_RETRY_COUNT)
-        {
-            VLOG_ERR("Max Retry: Message deleted from queue."
-                    " Seq no. %d, retry: %d",
-                    nl_data->seq_no, nl_data->retry_count);
-            shash_find_and_delete(&netlink_msgs, nl_data->identifier);
-            if (0 != nl_data->message)
+        if (CHECK_FLAG(nl_data->flags, DO_RETRY)) {
+            /* Below counter increment will avoid retrying in the immediate batch */
+            nl_data->retry_count++;
+
+            if(nl_data->retry_count > MAX_NETLINK_RETRY_COUNT)
             {
-                free(nl_data->message);
+                VLOG_ERR("Max Retry: Message deleted from queue."
+                         " Seq no.: %u, retry_count: %u, retry: %u",
+                         nl_data->seq_no,  nl_data->retry_count,
+                         nl_data->retry_count/RETRY_COUNT_DIVIDER);
+                shash_find_and_delete(&netlink_msgs, nl_data->identifier);
+                if (0 != nl_data->message)
+                {
+                    free(nl_data->message);
+                }
+                free(nl_data);
             }
-            free(nl_data);
+            /*divisible by 4 (RETRY_COUNT_DIVIDER) */
+            else if (counter && !(nl_data->retry_count & 0x3))
+            {
+                VLOG_DBG("Sending message with sequence no: %u, retry: %u, "
+                         "retry_count: %u, counter per retry: %u",
+                         nl_data->seq_no, nl_data->retry_count/RETRY_COUNT_DIVIDER,
+                         nl_data->retry_count, counter);
+
+                if (send(nl_sock, nl_data->message, nl_data->msg_size, 0) == -1)
+                {
+                    VLOG_ERR("Netlink send failed for sequence no. %u (%s)",
+                            nl_data->seq_no, strerror(errno));
+                }
+                counter--;
+            }
+            else if (!counter) {
+                if (nl_data->retry_count > 0)
+                    nl_data->retry_count--;
+                break;
+            }
         }
-        else
-        {
-            VLOG_DBG("Sending message with sequence no: %d, retry: %d",
-                    nl_data->seq_no, nl_data->retry_count);
-
-            if (send(nl_sock, nl_data->message, nl_data->msg_size, 0) == -1)
-            {
-                VLOG_ERR("Netlink send failed for sequence no. %d (%s)",
-                        nl_data->seq_no, strerror(errno));
-            }
+        else {
+            /* This is to delay retry for one interval for the first time
+               regardless of RETRY_COUNT_DIVIDER */
+            SET_FLAG(nl_data->flags, DO_RETRY);
+            VLOG_DBG("Set DO_RETRY flag seq no: %u, retry_count: %u",
+                     nl_data->seq_no, nl_data->retry_count);
         }
     }
     pthread_mutex_unlock(&portd_nl_msg_q_mutex);
@@ -354,7 +381,7 @@ portd_retry_messages()
  *      false : Could not add to queue. Id already exists.
  */
 static bool
-portd_netlink_insert_message(void *msg, int len, int seq_no, char *identifier)
+portd_netlink_insert_message(void *msg, uint32_t len, uint32_t seq_no, char *identifier)
 {
 
     PORT_NL_QUEUE_t    *nl_data = NULL;
@@ -364,7 +391,7 @@ portd_netlink_insert_message(void *msg, int len, int seq_no, char *identifier)
     if (NULL == identifier)
     {
         char id[PORTD_NL_ID_LEN] = {0};
-        snprintf(id, PORTD_NL_ID_LEN, "%d", seq_no);
+        snprintf(id, PORTD_NL_ID_LEN, "%u", seq_no);
         identifier = id;
     }
 
@@ -375,7 +402,7 @@ portd_netlink_insert_message(void *msg, int len, int seq_no, char *identifier)
         /* sequence numbers must be unique */
         if(nl_data->seq_no == seq_no)
         {
-            VLOG_ERR("Message with seq no %d already exists", seq_no);
+            VLOG_ERR("Message with seq no %u already exists", seq_no);
             pthread_mutex_unlock(&portd_nl_msg_q_mutex);
             return false;
         }
@@ -394,7 +421,7 @@ portd_netlink_insert_message(void *msg, int len, int seq_no, char *identifier)
         free(nl_data);
 
         VLOG_DBG("Message with id %s already exists. Over-writing."
-                " New seq no. %d", identifier, seq_no);
+                " New seq no. %u", identifier, seq_no);
     }
 
     /* allocate memory and copy message details */
@@ -411,7 +438,7 @@ portd_netlink_insert_message(void *msg, int len, int seq_no, char *identifier)
     nl_data->seq_no = seq_no;
 
     shash_add_once(&netlink_msgs, identifier, nl_data);
-    VLOG_DBG("Message with id %s, seq %d added to queue",
+    VLOG_DBG("Message with id: %s, seq no.: %u added to queue",
             identifier, seq_no);
     retval = true;
 
@@ -429,7 +456,7 @@ portd_netlink_insert_message(void *msg, int len, int seq_no, char *identifier)
  *      void
  */
 static void
-portd_netlink_remove_message(int seq_no)
+portd_netlink_remove_message(uint32_t seq_no)
 {
     struct shash_node *node;
     bool is_msg_found = false;
@@ -447,7 +474,7 @@ portd_netlink_remove_message(int seq_no)
             }
             free(nl_data);
 
-            VLOG_DBG("Message with seq no. %d deleted from queue",
+            VLOG_DBG("Message with seq no. %u deleted from queue",
                     seq_no);
             is_msg_found = true;
             break;
@@ -457,7 +484,7 @@ portd_netlink_remove_message(int seq_no)
 
     if (!is_msg_found)
     {
-        VLOG_DBG("Message with seq no. %d not found in queue", seq_no);
+        VLOG_DBG("Message with seq no. %u not found in queue", seq_no);
     }
     return;
 }
@@ -536,13 +563,13 @@ portd_init_netlink_msg_retry()
  *
  */
 bool
-portd_send_netlink_msg(void* msg, int msg_len, int seq_no, char *identifier)
+portd_send_netlink_msg(void* msg, uint32_t msg_len, uint32_t seq_no, char *identifier)
 {
     bool retval = portd_netlink_insert_message(msg, msg_len, seq_no,
             identifier);
     if (send(nl_sock, msg, msg_len, 0) == -1)
     {
-        VLOG_ERR("Netlink send failed for sequence no. %d (%s)",
+        VLOG_ERR("Netlink send failed for sequence no. %u (%s)",
                 seq_no, strerror(errno));
     }
     return retval;
@@ -978,6 +1005,9 @@ portd_update_kernel_intf_up_down(char *intf_name, const unsigned *intf_flags)
     struct smap user_config;
     const char *admin_status;
 
+    VLOG_DBG("Interface %s, kernel intf_flags=%0x, state=%s ",
+             intf_name, *intf_flags, (*intf_flags & IFF_UP) ? "UP" : "DOWN");
+
     OVSREC_INTERFACE_FOR_EACH (interface_row, idl) {
         if (!strcmp(intf_name, interface_row->name)) {
             smap_clone(&user_config, &interface_row->user_config);
@@ -987,10 +1017,12 @@ portd_update_kernel_intf_up_down(char *intf_name, const unsigned *intf_flags)
                 !strcmp(admin_status,
                         OVSREC_INTERFACE_USER_CONFIG_ADMIN_UP)) {
                 if (!intf_flags || !(*intf_flags & IFF_UP)) {
+                    VLOG_DBG("Interface %s, Doing Admin UP for kernel if", intf_name);
                     portd_interface_up_down(interface_row->name,
                                         OVSREC_INTERFACE_USER_CONFIG_ADMIN_UP);
                 }
              } else if (!intf_flags || (*intf_flags & IFF_UP)) {
+                    VLOG_DBG("Interface %s, Doing Admin DOWN for kernel if", intf_name);
                     portd_interface_up_down(interface_row->name,
                                         OVSREC_INTERFACE_USER_CONFIG_ADMIN_DOWN);
              }
@@ -1289,7 +1321,7 @@ portd_set_interface_mtu(const char *interface_name, unsigned int mtu)
         return;
     }
 
-    req.i.ifi_change = 0xffffffff;
+    req.i.ifi_change = 0;
     rta = (struct rtattr *)(((char *) &req) + NLMSG_ALIGN(req.n.nlmsg_len));
     rta->rta_type = IFLA_MTU;
     rta->rta_len = RTA_LENGTH(sizeof(unsigned int));
@@ -1329,6 +1361,8 @@ portd_interface_up_down(const char *interface_name, const char *status)
         VLOG_ERR("Invalid interface-name as argument");
         return;
     }
+
+    VLOG_DBG("Interface %s, Status: %s", interface_name, status);
 
     memset(&req, 0, sizeof(req));
 
