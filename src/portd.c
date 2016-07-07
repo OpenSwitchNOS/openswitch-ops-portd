@@ -1159,7 +1159,6 @@ portd_init(const char *remote)
     ovsdb_idl_add_column(idl, &ovsrec_port_col_ip6_address);
     ovsdb_idl_add_column(idl, &ovsrec_port_col_ip6_address_secondary);
     ovsdb_idl_add_column(idl, &ovsrec_port_col_interfaces);
-    ovsdb_idl_add_column(idl, &ovsrec_port_col_tag);
     ovsdb_idl_add_column(idl, &ovsrec_port_col_vlan_tag);
     ovsdb_idl_add_column(idl, &ovsrec_port_col_admin);
     ovsdb_idl_add_column(idl, &ovsrec_port_col_status);
