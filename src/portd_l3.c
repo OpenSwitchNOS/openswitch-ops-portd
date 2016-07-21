@@ -85,6 +85,7 @@ portd_config_iprouting(int enable)
     const char *ipv6_path = "/proc/sys/net/ipv6/conf/all/forwarding";
     const char *icmp_bcast = "/proc/sys/net/ipv4/icmp_echo_ignore_broadcasts";
     const char *source_route = "/proc/sys/net/ipv4/conf/all/accept_source_route";
+    const char *route_max_size = "/proc/sys/net/ipv6/route/max_size";
 
     nbytes = snprintf(buf,2, "%d", enable);
 
@@ -144,6 +145,18 @@ portd_config_iprouting(int enable)
     }
     close(fd);
     VLOG_DBG("%s ipv4 source route", (enable == 1 ? "Enabled" : "Disabled"));
+
+    nbytes = snprintf(buf, 8, "%d", IPV6_ROUTE_MAX_SIZE);
+    if ((fd = open(route_max_size, O_WRONLY)) == -1) {
+        VLOG_ERR("Unable to open %s (%s)", route_max_size, strerror(errno));
+        return;
+    }
+    if (write(fd, buf, nbytes) == -1) {
+        VLOG_ERR("Unable to write to %s (%s)", route_max_size, strerror(errno));
+        close(fd);
+        return;
+    }
+    close(fd);
 }
 
 /* Take care of add/delete/modify of v4/v6 address from db */

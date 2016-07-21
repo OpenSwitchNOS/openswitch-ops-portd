@@ -41,6 +41,7 @@
 #define RECV_BUFFER_SIZE 4096
 /* ifa_scope value of link local IPv6 address */
 #define IPV6_ADDR_SCOPE_LINK 253
+#define IPV6_ROUTE_MAX_SIZE 8388608
 
 #define PORTD_EMPTY_STRING ""
 #define INTERFACE_TYPE_VLAN "vlan"
