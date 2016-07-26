@@ -40,12 +40,18 @@
 
 VLOG_DEFINE_THIS_MODULE(linux_bond);
 
-#define MAX_FILE_PATH_LEN       100
 #define WRITE_UPDATE            "w+"
+#define READ                    "r"
+
+#define MAX_FILE_PATH_LEN       100
 #define BONDING_MASTERS_PATH    "/sys/class/net/bonding_masters"
 #define BONDING_MODE_PATH       "/sys/class/net/%s/bonding/mode"
 #define BONDING_SLAVES_PATH     "/sys/class/net/%s/bonding/slaves"
 #define BALANCE_XOR_MODE        "2"
+#define BONDING_CONFIG_PATH     "/proc/net/bonding/%s"
+#define BONDING_LINE_LEN        60
+#define SLAVE_IF                "Slave Interface: %s"
+#define SLAVE_IF_LEN            19
 
 /**
  * Deletes a Linux bond interface previously created.
@@ -147,6 +153,45 @@ bool add_slave_to_bond(char* bond_name, char* slave_name)
 } /* add_slave_to_bond */
 
 /**
+ * Checks if a slave is in a Linux bond.
+ *
+ * @param bond_name is the name of the bond.
+ * @param slave_name is the name of the slave interface
+ * @return true if the slave is in the bond, false otherwise
+ *
+ */
+static bool check_slave_in_bond(char* bond_name, char* slave_name)
+{
+    FILE *fp;
+    char buffer[BONDING_LINE_LEN];
+    char file_path[MAX_FILE_PATH_LEN];
+    bool found = false;
+
+    snprintf(file_path, MAX_FILE_PATH_LEN, BONDING_CONFIG_PATH, bond_name);
+    if((fp = fopen(file_path, READ)) == NULL) {
+        VLOG_WARN("bond: Unable to open file %s", file_path);
+        return false;
+    }
+
+    char slave_if[SLAVE_IF_LEN];
+    snprintf(slave_if, SLAVE_IF_LEN, SLAVE_IF, slave_name);
+
+    while(fgets(buffer, BONDING_LINE_LEN, fp) != NULL) {
+        if(strstr(buffer, slave_if) != NULL) {
+            found = true;
+            break;
+         }
+    }
+
+    if(fp) {
+        fclose(fp);
+    }
+
+    return found;
+} /* check_slave_in_bond */
+
+
+/**
  * Removes a slave from a Linux bond.
  *
  * @param bond_name is the name of the bond.
@@ -162,6 +207,12 @@ bool remove_slave_from_bond(char* bond_name, char* slave_name)
 
     VLOG_INFO("bond: Removing bonding slave %s from bond %s",
              slave_name, bond_name);
+
+    // Don't do anything if slave is not in bond
+    if(!check_slave_in_bond(bond_name, slave_name)) {
+        VLOG_INFO("bond: Slave %s is not in bond %s", slave_name, bond_name);
+        return false;
+    }
 
     snprintf(file_path, MAX_FILE_PATH_LEN, BONDING_SLAVES_PATH, bond_name);
 
