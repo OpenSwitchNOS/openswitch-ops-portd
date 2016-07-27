@@ -1464,9 +1464,14 @@ portd_reconfigure_subinterface(const struct ovsrec_port *port_row)
             OVSREC_INTERFACE_USER_CONFIG_ADMIN_UP) == 0))
     {
         intf_status = true;
+        VLOG_DBG("Parent interface is up for subinterface %s",
+                 port_row->name);
     }else {
-      return false;
+        VLOG_ERR("Parent interface is down for subinterface %s",
+                 port_row->name);
+        return false;
     }
+
     const char *cur_state =NULL;
     cur_state = smap_get(&intf_row->user_config,
                 INTERFACE_USER_CONFIG_MAP_ADMIN);
@@ -1474,11 +1479,9 @@ portd_reconfigure_subinterface(const struct ovsrec_port *port_row)
                 && (strcmp(cur_state,
                         OVSREC_INTERFACE_USER_CONFIG_ADMIN_UP) == 0))
     {
-        if(intf_status)
-        {
-            VLOG_ERR("Parent interface is down for subinterface %s",
-                    port_row->name);
-        }
+        intf_status = true;
+    }else {
+        VLOG_ERR("Subinterface %s is down in DB.", port_row->name);
         intf_status = false;
     }
 
