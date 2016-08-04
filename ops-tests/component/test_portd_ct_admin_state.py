@@ -18,7 +18,6 @@
 
 from pytest import mark
 
-
 TOPOLOGY = """
 # +-------+
 # |       |     +-------+
@@ -37,16 +36,20 @@ hsw1:if01 -- sw1:if01
 
 @mark.gate
 def test_portd_ct_admin_state(topology, step):
-    first_interface = "1"
+
     port_down = 'enable="false"'
     port_up = 'enable="true"'
     sw1 = topology.get("sw1")
+    # Changing hardcoded interface for dynamic
+    p1 = sw1.ports['if01']
+    first_interface = "{}".format(p1)
+
     # step('Test portd admin state changes for L3 interfaces')
     step('1-Configuring the topology')
     # Configure switch sw1
     sw1("configure terminal")
     # Configure interface 1 on switch sw1
-    sw1("interface 1")
+    sw1("interface {}".format(p1))
     sw1("ip address 10.0.10.1/24")
     sw1("ipv6 address 2000::1/120")
     sw1("end")
@@ -73,7 +76,7 @@ def test_portd_ct_admin_state(topology, step):
     assert port_down in output
     step('5-Verify port is up on no shut and goes down when port is disabled')
     sw1("configure terminal")
-    sw1("interface 1")
+    sw1("interface {}".format(p1))
     sw1("no shutdown")
     sw1("end")
     cmd = "get port {first_interface} hw_config".format(**locals())
@@ -91,7 +94,7 @@ def test_portd_ct_admin_state(topology, step):
     step('6-Verify port hw_config is set to false when interface '
          'user_config is down for L3 and VLAN interfaces')
     sw1("configure terminal")
-    sw1("interface 1")
+    sw1("interface {}".format(p1))
     sw1("no shutdown")
     sw1("end")
     cmd = "get port {first_interface} hw_config".format(**locals())
