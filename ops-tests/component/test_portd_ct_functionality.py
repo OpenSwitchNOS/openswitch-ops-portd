@@ -35,6 +35,7 @@ sw1:if03
 sw1:if04
 """
 
+
 def execute_command_and_verify_response(sw1, step, command, u_shell, max_try=1,
                                         wait_time=1, **verify_strs):
     for i in range(max_try):
@@ -73,7 +74,11 @@ def portd_functionality_tc1(sw1, step):
     sw1(command, shell='vsctl')
     sw1("configure terminal")
     sw1("vlan internal range 400 500 ascending")
-    step("Assigning ip address to interface 1")
+    if01 = sw1.ports['if01']
+    if02 = sw1.ports['if02']
+    if03 = sw1.ports['if03']
+    if04 = sw1.ports['if04']
+    step("Assigning ip address to interface {if01}".format(**locals()))
     ips = ["10.1.1.1", "11.1.1.1"]
     ifs = [sw1.ports["if01"], sw1.ports["if02"]]
     size = len(ips)
@@ -85,6 +90,7 @@ def portd_functionality_tc1(sw1, step):
         lines = output.splitlines()
         indexval = lines.index("interface {}".format(ifs[i]))
         assert "ip address {}/8".format(ips[i]) in lines[indexval + 1]
+    sleep (5)
     step("Verifying internal VLANs assigned to interfaces in the DB")
     command = ""
     output = sw1("do show vlan internal")
@@ -93,7 +99,7 @@ def portd_functionality_tc1(sw1, step):
     assert '400' in lines[indexval + 3] or '400' in lines[indexval + 4] and \
            '401' in lines[indexval + 3] or '401' in lines[indexval + 4]
     step("Verifying internal VLANs assigned to interfaces in the kernel")
-    command = "ip netns exec swns ip addr show 1"
+    command = "ip netns exec swns ip addr show {if01}".format(**locals())
     execute_command_and_verify_response(
         sw1,
         step,
@@ -101,9 +107,9 @@ def portd_functionality_tc1(sw1, step):
         'bash',
         max_try=10,
         str1="inet")
-    output = sw1("ip netns exec swns ip addr show 1", shell='bash')
+    output = sw1("ip netns exec swns ip addr show {if01}".format(**locals()), shell='bash')
     assert 'inet 10.1.1.1/8' in output
-    command = "ip netns exec swns ip addr show 2"
+    command = "ip netns exec swns ip addr show {if02}".format(**locals())
     execute_command_and_verify_response(
         sw1,
         step,
@@ -111,7 +117,7 @@ def portd_functionality_tc1(sw1, step):
         'bash',
         max_try=10,
         str1="inet")
-    output = sw1("ip netns exec swns ip addr show 2", shell='bash')
+    output = sw1("ip netns exec swns ip addr show {if02}".format(**locals()), shell='bash')
     assert 'inet 11.1.1.1/8' in output
 
 
@@ -120,13 +126,19 @@ def portd_functionality_tc1(sw1, step):
 # assigning new internal VLANs.
 def portd_functionality_tc2(sw1, step):
     step("Removing internal VLAN range")
+    sw1("configure terminal")
     sw1("no vlan internal range")
-    step("Assigning ip address to interface 3")
+    if01 = sw1.ports['if01']
+    if02 = sw1.ports['if02']
+    if03 = sw1.ports['if03']
+    if04 = sw1.ports['if04']
+    step("Assigning ip address to interface {if03}".format(**locals()))
     sw1("interface {}".format(sw1.ports["if03"]))
     sw1("ip address 12.1.1.1/8")
     sw1("exit")
-    step("Verifying default internal VLAN assigned to interface 3 in the DB")
-    command = "get port 3 hw_config:internal_vlan_id"
+    sleep (5)
+    step("Verifying default internal VLAN assigned to interface {if03} in the DB".format(**locals()))
+    command = "get port {if03} hw_config:internal_vlan_id".format(**locals())
     execute_command_and_verify_response(
         sw1,
         step,
@@ -134,10 +146,10 @@ def portd_functionality_tc2(sw1, step):
         'vsctl',
         max_try=10,
         str1="1024")
-    output = sw1("get port 3 hw_config:internal_vlan_id", shell='vsctl')
+    output = sw1("get port {if03} hw_config:internal_vlan_id".format(**locals()), shell='vsctl')
     assert '"1024"' in output
-    step("Verify default internal VLAN assigned to interface 3 in the kernel")
-    command = "ip netns exec swns ip addr show 3"
+    step("Verify default internal VLAN assigned to interface {if03} in the kernel".format(**locals()))
+    command = "ip netns exec swns ip addr show {if03}".format(**locals())
     execute_command_and_verify_response(
         sw1,
         step,
@@ -145,7 +157,7 @@ def portd_functionality_tc2(sw1, step):
         'bash',
         max_try=10,
         str1="inet")
-    output = sw1("ip netns exec swns ip addr show 3", shell='bash')
+    output = sw1("ip netns exec swns ip addr show {if03}".format(**locals()), shell='bash')
     assert 'inet 12.1.1.1/8' in output
 
 
@@ -154,13 +166,19 @@ def portd_functionality_tc2(sw1, step):
 # allocated in descending order.
 def portd_functionality_tc3(sw1, step):
     step("Assigning internal VLAN range in descending order")
+    sw1("configure terminal")
     output = sw1("vlan internal range 3000 4000 descending")
-    step("Assigning ip address to interface 4")
+    if01 = sw1.ports['if01']
+    if02 = sw1.ports['if02']
+    if03 = sw1.ports['if03']
+    if04 = sw1.ports['if04']
+    step("Assigning ip address to interface {if04}".format(**locals()))
     sw1("interface {}".format(sw1.ports["if04"]))
     sw1("ip address 13.1.1.1/8")
     sw1("exit")
-    step("Verifying internal VLAN assigned to interface 4 in the DB")
-    command = "get port 4 hw_config:internal_vlan_id"
+    sleep (5)
+    step("Verifying internal VLAN assigned to interface {if04} in the DB".format(**locals()))
+    command = "get port {if04} hw_config:internal_vlan_id".format(**locals())
     execute_command_and_verify_response(
         sw1,
         step,
@@ -168,10 +186,10 @@ def portd_functionality_tc3(sw1, step):
         'vsctl',
         max_try=10,
         str1="4000")
-    output = sw1("get port 4 hw_config:internal_vlan_id", shell='vsctl')
+    output = sw1("get port {if04} hw_config:internal_vlan_id".format(**locals()), shell='vsctl')
     assert '"4000"' in output
-    step("Verifying internal VLAN assigned to interface 4 in the kernel")
-    command = "ip netns exec swns ip addr show 4"
+    step("Verifying internal VLAN assigned to interface {if04} in the kernel".format(**locals()))
+    command = "ip netns exec swns ip addr show {if04}".format(**locals())
     execute_command_and_verify_response(
         sw1,
         step,
@@ -179,7 +197,7 @@ def portd_functionality_tc3(sw1, step):
         'bash',
         max_try=10,
         str1="inet")
-    output = sw1("ip netns exec swns ip addr show 4", shell='bash')
+    output = sw1("ip netns exec swns ip addr show {if04}".format(**locals()), shell='bash')
     assert 'inet 13.1.1.1/8' in output
 
 
@@ -188,22 +206,30 @@ def portd_functionality_tc3(sw1, step):
 def portd_functionality_tc4(sw1, step):
     step("Assigning same L2 VLAN after configuring L3 internal VLAN")
     step("Assigning internal VLAN range 500-600 in ascending order")
+    if01 = sw1.ports['if01']
+    if02 = sw1.ports['if02']
+    if03 = sw1.ports['if03']
+    if04 = sw1.ports['if04']
+    sw1("configure terminal")
     output = sw1("vlan internal range 500 600 ascending")
-    step("Deleting L3 configuration on interface 1")
+    sleep (5)
+    step("Deleting L3 configuration on interface {if01}".format(**locals()))
     sw1("interface {}".format(sw1.ports["if01"]))
     sw1("no routing")
     sw1("routing")
-    step("Assigning ip address to interface 1")
+    step("Assigning ip address to interface {if01}".format(**locals()))
     sw1("ip address 14.1.1.1/8")
     sw1("exit")
+    sleep (5)
     step("Trying to assign L2 VLAN500 which should fail")
     output = sw1("vlan 500")
     assert "VLAN500 is used as an internal VLAN. No further configuration" \
            " allowed" in output
-    step("Deleting L3 configuration on interface 1")
+    step("Deleting L3 configuration on interface {if01}".format(**locals()))
     sw1("interface {}".format(sw1.ports["if01"]))
     sw1("routing")
     sw1("exit")
+    sleep (5)
     step("Trying to re-assign L2 VLAN500 which should be successful")
     output = sw1("vlan 500")
     output = sw1("get vlan VLAN500 name", shell='vsctl')
@@ -217,34 +243,41 @@ def portd_functionality_tc5(sw1, step):
     step("Verifying sequential assignment of L3 internal VLAN"
          " when L2 VLAN is present or absent")
     step("Adding L2 VLAN1000")
+    sw1("configure terminal")
     sw1("vlan 1000")
     sw1("exit")
     step("Adding L2 VLAN1001")
     sw1("vlan 1001")
     sw1("exit")
+    if01 = sw1.ports['if01']
+    if02 = sw1.ports['if02']
+    if03 = sw1.ports['if03']
+    if04 = sw1.ports['if04']
     step("Assigning internal VLAN range 1000-1100 in ascending order")
     output = sw1("vlan internal range 1000 1100 ascending")
-    step("Deleting L3 configuration on interface 1")
+    sleep (5)
+    step("Deleting L3 configuration on interface {if01}".format(**locals()))
     sw1("interface {}".format(sw1.ports["if01"]))
     sw1("no routing")
     sw1("routing")
-    step("Assigning ip address to interface 1")
+    step("Assigning ip address to interface {if01}".format(**locals()))
     sw1("ip address 15.1.1.1/8")
     sw1("exit")
-    step("Verifying internal VLAN assigned to interface 1 in the DB")
-    output = sw1("get port 1 hw_config:internal_vlan_id", shell='vsctl')
+    step("Verifying internal VLAN assigned to interface {if01} in the DB".format(**locals()))
+    output = sw1("get port {if01} hw_config:internal_vlan_id".format(**locals()), shell='vsctl')
     assert '"1002"' in output
     step("Deleting L2 VLAN1001")
+    sw1("configure terminal")
     output = sw1("no vlan 1001")
-    step("Deleting L3 configuration on interface 2")
+    step("Deleting L3 configuration on interface {if02}".format(**locals()))
     sw1("interface {}".format(sw1.ports["if02"]))
     sw1("no routing")
     sw1("routing")
-    step("Assigning ip address to interface 2")
+    step("Assigning ip address to interface {if02}".format(**locals()))
     sw1("ip address 16.1.1.1/8")
     sw1("exit")
-    step("Verifying internal VLAN assigned to interface 2 in the DB")
-    output = sw1("get port 2 hw_config:internal_vlan_id", shell='vsctl')
+    step("Verifying internal VLAN assigned to interface {if02} in the DB".format(**locals()))
+    output = sw1("get port {if02} hw_config:internal_vlan_id".format(**locals()), shell='vsctl')
     assert '"1001"' in output
 
 
@@ -255,20 +288,24 @@ def portd_functionality_tc5(sw1, step):
 def portd_functionality_tc6(sw1, step):
     step("Verifying kernel interfaces if they are 'UP' for"
          " 'no shutdown' case and vice-versa")
-    step("Assigning ipv6 address to interface 3")
+    if01 = sw1.ports['if01']
+    if02 = sw1.ports['if02']
+    if03 = sw1.ports['if03']
+    if04 = sw1.ports['if04']
+    step("Assigning ipv6 address to interface {if03}".format(**locals()))
+    sw1("configure terminal")
     sw1("interface {}".format(sw1.ports["if03"]))
     sw1("ipv6 address 1000::1/120")
-    step("Bringing interface 3 up")
+    step("Bringing interface {if03} up".format(**locals()))
     sw1("no shutdown")
     # sw1("exit")
-    step("Verifying interface 3 'up' in the kernel")
-    output = sw1("ip netns exec swns ifconfig 3", shell='bash')
+    step("Verifying interface {if03} 'up' in the kernel".format(**locals()))
+    output = sw1("ip netns exec swns ifconfig {if03}".format(**locals()), shell='bash')
     output = output.split()
     indexval = output.index("BROADCAST")
     assert 'UP' in output[indexval - 1]
-    step("Verifying interface 3 ipv4 and ipv6 addresses in the kernel"
-         " after 'no shut'")
-    command = "ip netns exec swns ip addr show 3"
+    step("Verifying interface {if03} ipv4 and ipv6 addresses in the kernel after 'no shut'".format(**locals()))
+    command = "ip netns exec swns ip addr show {if03}".format(**locals())
     execute_command_and_verify_response(
         sw1,
         step,
@@ -277,13 +314,15 @@ def portd_functionality_tc6(sw1, step):
         max_try=20,
         str1="inet",
         str2="inet6")
-    output = sw1("ip netns exec swns ip addr show 3", shell='bash')
+    output = sw1("ip netns exec swns ip addr show {if03}".format(**locals()), shell='bash')
     assert 'inet 12.1.1.1/8' in output
     assert 'inet6 1000::1/120' in output
-    step("Bringing interface 3 down")
+    step("Bringing interface {if03} down".format(**locals()))
+    sw1("configure terminal")
+    sw1("interface {}".format(sw1.ports["if03"]))
     sw1("shutdown")
-    step("Verifying interface 3 'down' in the kernel")
-    command = "ip netns exec swns ip addr show 3"
+    step("Verifying interface {if03} 'down' in the kernel".format(**locals()))
+    command = "ip netns exec swns ip addr show {if03}".format(**locals())
     execute_command_and_verify_response(
         sw1,
         step,
@@ -291,19 +330,20 @@ def portd_functionality_tc6(sw1, step):
         'bash',
         max_try=10,
         str1="BROADCAST")
-    output = sw1("ip netns exec swns ifconfig 3", shell='bash')
+    output = sw1("ip netns exec swns ifconfig {if03}".format(**locals()), shell='bash')
     output = output.split()
     indexval = output.index("BROADCAST")
     assert "UP" not in output[indexval - 1]
-    step("Verifying interface 3 ipv4 address in the kernel after 'shut'")
-    output = sw1("ip netns exec swns ip addr show 3", shell='bash')
+    step("Verifying interface {if03} ipv4 address in the kernel after 'shut'".format(**locals()))
+    output = sw1("ip netns exec swns ip addr show {if03}".format(**locals()), shell='bash')
     assert 'inet 12.1.1.1/8' in output
-    step("Bringing interface 3 up again")
+    step("Bringing interface {if03} up again".format(**locals()))
+    sw1("configure terminal")
+    sw1("interface {}".format(sw1.ports["if03"]))
     sw1("no shutdown")
     sw1("exit")
-    step("Re-verifying interface 3 ipv4 and ipv6 addresses in the kernel"
-         " after 'no shut'")
-    command = "ip netns exec swns ip addr show 3"
+    step("Re-verifying interface {if03} ipv4 and ipv6 addresses in the kernel after 'no shut'".format(**locals()))
+    command = "ip netns exec swns ip addr show {if03}".format(**locals())
     execute_command_and_verify_response(
         sw1,
         step,
@@ -312,7 +352,7 @@ def portd_functionality_tc6(sw1, step):
         max_try=20,
         str1="inet",
         str2="inet6")
-    output = sw1("ip netns exec swns ip addr show 3", shell='bash')
+    output = sw1("ip netns exec swns ip addr show {if03}".format(**locals()), shell='bash')
     assert 'inet 12.1.1.1/8' in output
     assert 'inet6 1000::1/120' in output
 
@@ -328,22 +368,28 @@ def portd_functionality_tc7(sw1, step):
     mtu_max = int(output.split('\"')[1])
     mtu_valid = mtu_max - 100
     mtu_invalid = mtu_max + 100
+    if01 = sw1.ports['if01']
+    if02 = sw1.ports['if02']
+    if03 = sw1.ports['if03']
+    if04 = sw1.ports['if04']
+    sw1("configure terminal")
     sw1("interface {}".format(sw1.ports["if03"]))
     output = sw1("no shutdown")
     output = sw1("no routing")
     output = sw1("mtu {}".format(mtu_valid))
     output = sw1("exit")
-    step("Verifying interface 3 'MTU' value in the kernel")
-    output = sw1("ip netns exec swns ifconfig 3", shell='bash')
+    step("Verifying interface {if03} 'MTU' value in the kernel".format(**locals()))
+    output = sw1("ip netns exec swns ifconfig {if03}".format(**locals()), shell='bash')
     mtu = int(search('\d+', search('MTU:\d+', output).group()).group())
     assert mtu == mtu_valid
+    sw1("configure terminal")
     sw1("interface {}".format(sw1.ports["if03"]))
     output = sw1("no shutdown")
     output = sw1("no routing")
     output = sw1("mtu {}".format(mtu_invalid))
     output = sw1("exit")
-    step("Verifying interface 3 with invalid 'MTU' value in the kernel")
-    output = sw1("ip netns exec swns ifconfig 3", shell='bash')
+    step("Verifying interface {if03} with invalid 'MTU' value in the kernel".format(**locals()))
+    output = sw1("ip netns exec swns ifconfig {if03}".format(**locals()), shell='bash')
     mtu = int(search('\d+', search('MTU:\d+', output).group()).group())
     assert mtu == mtu_valid
 
@@ -352,6 +398,18 @@ def portd_functionality_tc7(sw1, step):
 def test_portd_ct_functionality(topology, step):
     sw1 = topology.get("sw1")
     assert sw1 is not None
+    if01 = sw1.ports['if01']
+    assert if01 is not None
+    print ("if01 = {if01}".format(**locals()))
+    if02 = sw1.ports['if02']
+    assert if02 is not None
+    print ("if02 = {if02}".format(**locals()))
+    if03 = sw1.ports['if03']
+    assert if03 is not None
+    print ("if03 = {if03}".format(**locals()))
+    if04 = sw1.ports['if04']
+    assert if04 is not None
+    print ("if04 = {if04}".format(**locals()))
     portd_functionality_tc1(sw1, step)
     portd_functionality_tc2(sw1, step)
     portd_functionality_tc3(sw1, step)
