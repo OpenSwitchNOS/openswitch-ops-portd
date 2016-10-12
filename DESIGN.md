@@ -8,6 +8,7 @@ The `ops-portd daemon` manages configuration for L3 interfaces to include managi
 * Manages internal VLAN allocation by reserving a VLAN from a configurable range to be used by the system for configuring the L3 interface in the hardware.
 * Configures the logical VLAN interface in the Linux kernel for inter-VLAN routing.
 * Updates the database with directly connected subnet routes to keep those routes in up-to-date with the Linux kernel.
+* Configures GRE tunnels in the Linux kernel.
 
 ##  Design choices
 The ops-portd was added to OpenSwitch architecture so that there would be one entity responsible for managing the various L3 related configuration items.
@@ -97,6 +98,9 @@ The ops-portd reads the following columns from interface table:
   admin_state - Admin up/down state
   user_config:admin - up/down config status.
   type - Interface type
+  options:local_ip - Source IP for a GRE tunnel
+  options:remote_ip - Destination IP for a GRE tunnel
+  options:ttl - Time to live for a GRE tunnel
 ```
 
 The ops-portd writes the following columns to the vlan table:
@@ -142,6 +146,7 @@ The ops-portd daemon main loop monitors the:
 * IP address configuration on L3 ports and synchronize the IP addresses with the Linux kernel. Also update the database with the directly connected route entries for the configured IP addresses.
 * Interface entry for the type internal and update the corresponding logical VLAN interface in the Linux kernel.
 * Netlink socket for new interface creation and update the newly created interface with the database admin status.
+* GRE tunnel configurations to create a tunnel link within the Linux kernel.
 
 
 ## References

@@ -50,6 +50,7 @@
 
 #define PORTD_EMPTY_STRING ""
 #define INTERFACE_TYPE_VLAN "vlan"
+#define INTERFACE_TYPE_GRE "gre"
 
 #define INET_ADDRSTRLEN     16
 #define INET_PREFIX_SIZE    18
@@ -61,7 +62,10 @@
 #define CONNECTED_ROUTE_DISTANCE    0
 
 #define PORT_NAME_MAX_LEN 32
+#define MAX_LINK_BUFF_SIZE 128
 
+#define GRE_TTL_DEFAULT 64
+#define TTL_STRLEN 4
 
 #define NLMSG_TAIL(nmsg) \
         ((struct rtattr *) (((void *) (nmsg)) + \
@@ -95,6 +99,7 @@ struct port {
     struct hmap secondary_ip4addr; /* List of secondary IPv4 addresses */
     struct hmap secondary_ip6addr; /* List of secondary IPv6 addresses */
     struct vrf *vrf;
+    struct gre *gre;
 };
 
 /* VRF configuration */
@@ -191,6 +196,20 @@ struct portd_arbiter_class {
     struct portd_arbiter_layer_class *layers;
 };
 
+/* Structure for netlink requests */
+struct netlink_req {
+    struct nlmsghdr  n;
+    struct ifinfomsg i;
+    char buf[MAX_LINK_BUFF_SIZE];
+};
+
+/* GRE tunnel configuration */
+struct gre {
+    char ttl[TTL_STRLEN];
+    char src_ip[INET_ADDRSTRLEN];
+    char dest_ip[INET_ADDRSTRLEN];
+};
+
 struct ovsrec_port* portd_port_db_lookup(const char *);
 /* Helper functions to identify intervlan interfaces */
 bool portd_interface_type_internal_check(const struct ovsrec_port *port,
@@ -234,4 +253,17 @@ void portd_arbiter_port_run(const struct ovsrec_port *port,
 int
 get_vrf_ns_from_table_id(const struct ovsdb_idl *idl, const int64_t table_id,
                          char* vrf_ns_name);
+struct ovsrec_interface *
+portd_get_matching_interface_row(const struct ovsrec_port *port_row);
+void portd_del_interface_netlink(const char *sub_interface_name,
+                                 struct vrf *vrf);
+
+bool portd_reconfigure_tunnel_gre(const struct ovsrec_port *port_row,
+                                  struct port *port);
+/* GRE tunnel functions */
+void portd_gre_cache_create(struct port *port, const char *ttl,
+                            const char *src_ip, const char *dest_ip);
+bool portd_gre_cache_update(struct gre *gre, const char *ttl,
+                            const char *src_ip, const char *dest_ip);
+void portd_gre_cache_delete(struct gre *gre);
 #endif /* PORTD_H_ */

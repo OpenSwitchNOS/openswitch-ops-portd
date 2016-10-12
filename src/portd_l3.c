@@ -23,8 +23,10 @@
 #include <linux/if_addr.h>
 #include <net/if.h>
 #include <netinet/in.h>
+#include <netinet/ip.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include <linux/if_tunnel.h>
 
 #include "hash.h"
 #include "openvswitch/vlog.h"
@@ -675,13 +677,7 @@ portd_add_vlan_interface(const char *interface_name,
     int ifindex;
     int i;
     struct vrf *vrf = get_vrf_for_port(vlan_interface_name);
-
-    struct {
-        struct nlmsghdr  n;
-        struct ifinfomsg i;
-        char             buf[128];  /* must fit interface name length (IFNAMSIZ)
-                                       and attribute hdrs. */
-    } req;
+    struct netlink_req req;
 
     memset(&req, 0, sizeof(req));
 
@@ -748,11 +744,7 @@ portd_add_vlan_interface(const char *interface_name,
 void
 portd_del_vlan_interface(const char *vlan_interface_name)
 {
-    struct {
-        struct nlmsghdr  n;
-        struct ifinfomsg i;
-        char buf[128];  /* must fit interface name length (IFNAMSIZ)*/
-    } req;
+    struct netlink_req req;
 
     struct vrf *vrf = get_vrf_for_port(vlan_interface_name);
 
@@ -1327,4 +1319,143 @@ portd_add_port_to_cache(struct port *port)
             }
         }
     }
+}
+
+/*
+ * Sends a netlink request to the kernel for creating a GRE link.
+ */
+bool
+portd_reconfigure_tunnel_gre(const struct ovsrec_port *port_row,
+                             struct port *port)
+{
+    if (!port_row || !port) {
+        VLOG_ERR("Invalid port/port_row. port: %p, port_row: %p",
+                 port, port_row);
+        return false;
+    }
+
+    struct ovsrec_interface *intf_row;
+    struct vrf *vrf;
+    const char *ttl_str;
+    const char *src_ip_str;
+    const char *dest_ip_str;
+    struct in_addr src_ipv4;
+    struct in_addr dest_ipv4;
+    unsigned char prefixlen;
+    struct netlink_req req;
+    memset(&req, 0, sizeof(req));
+
+    bool is_create = port->gre == NULL;
+
+    intf_row = portd_get_matching_interface_row(port_row);
+    if (!intf_row) {
+        VLOG_ERR("Failed to get interface row %s", port_row->name);
+        return false;
+    }
+
+    src_ip_str = smap_get(&intf_row->options,
+                          OVSREC_INTERFACE_OPTIONS_LOCAL_IP);
+    dest_ip_str = smap_get(&intf_row->options,
+                           OVSREC_INTERFACE_OPTIONS_REMOTE_IP);
+
+    if (!src_ip_str || !dest_ip_str) {
+        VLOG_DBG("Source or destination IP not yet configured for interface %s."
+                 "Source IP: %s, destination IP: %s. Skipping",
+                 intf_row->name, src_ip_str ? src_ip_str : "NULL",
+                 dest_ip_str ? dest_ip_str : "NULL");
+        return false;
+    }
+
+    vrf = get_vrf_for_port(port_row->name);
+    if (!vrf) {
+        VLOG_ERR("Couldn't find associated VRF for port %s.", port_row->name);
+        return false;
+    }
+
+    ttl_str = smap_get(&intf_row->options, OVSREC_INTERFACE_OPTIONS_TTL);
+
+    /*
+     * Check if it's an update. If so, check if there are any updates prior
+     * to proceeding.
+     */
+    if (!is_create) {
+        if (!portd_gre_cache_update(port->gre, ttl_str, src_ip_str,
+                                    dest_ip_str)) {
+            VLOG_DBG("There were no updates. Skipping reconfiguration for "
+                     "port %s", port->name);
+            return false;
+        }
+
+        /* Updates require the link to be recreated. Delete existing link. */
+        portd_del_interface_netlink(port->name, vrf);
+
+        /*
+         * Clear the port address cache since the link was reset. This allows
+         * the IP configuration logic to trigger.
+         */
+        SAFE_FREE(port->ip4_address);
+    }
+
+    if (portd_get_prefix(AF_INET, CONST_CAST(char*, src_ip_str),
+                         &src_ipv4, &prefixlen) == -1) {
+        VLOG_ERR("Unable to get prefix info for source '%s', interface %s",
+                 src_ip_str, intf_row->name);
+        return false;
+    } else if (portd_get_prefix(AF_INET, CONST_CAST(char*, dest_ip_str),
+                                &dest_ipv4, &prefixlen) == -1) {
+        VLOG_ERR("Unable to get prefix info for destination '%s', interface %s",
+                 dest_ip_str, intf_row->name);
+        return false;
+    }
+
+    req.n.nlmsg_len = NLMSG_SPACE(sizeof(struct ifinfomsg));
+    req.n.nlmsg_pid = getpid();
+    req.n.nlmsg_type = RTM_NEWLINK;
+    req.n.nlmsg_flags = NLM_F_CREATE | NLM_F_REQUEST | NLM_F_EXCL;
+    req.i.ifi_family = AF_UNSPEC;
+
+    struct rtattr *linkinfo = NLMSG_TAIL(&req.n);
+    add_link_attr(&req.n, sizeof(req), IFLA_LINKINFO, NULL, 0);
+    add_link_attr(&req.n, sizeof(req), IFLA_INFO_KIND, INTERFACE_TYPE_GRE, 4);
+
+    struct rtattr *data = NLMSG_TAIL(&req.n);
+    add_link_attr(&req.n, sizeof(req), IFLA_INFO_DATA, NULL, 0);
+
+    /* TTL */
+    int ttl = GRE_TTL_DEFAULT;
+    if (ttl_str) {
+        ttl = atoi(ttl_str);
+        if (!ttl) {
+            VLOG_WARN("Invalid TTL configuration for port %s. "
+                      "Configuring with default value %d.",
+                      port->name, GRE_TTL_DEFAULT);
+            ttl = GRE_TTL_DEFAULT;
+        }
+    }
+    add_link_attr(&req.n, sizeof(req), IFLA_GRE_TTL, &ttl, 1);
+
+    /* Source IP */
+    add_link_attr(&req.n, sizeof(req), IFLA_GRE_LOCAL, &src_ipv4.s_addr, 4);
+
+    /* Destination IP */
+    add_link_attr(&req.n, sizeof(req), IFLA_GRE_REMOTE, &dest_ipv4.s_addr, 4);
+
+    /* Adjust rta_len for attributes */
+    data->rta_len = (void *)NLMSG_TAIL(&req.n) - (void *)data;
+    linkinfo->rta_len = (void *)NLMSG_TAIL(&req.n) - (void *)linkinfo;
+
+    add_link_attr(&req.n, sizeof(req), IFLA_IFNAME, port_row->name,
+                  strlen(port_row->name)+1);
+
+    if (send(NL_SOCK(vrf), &req, req.n.nlmsg_len, 0) == -1) {
+        VLOG_ERR("Netlink failed to create tunnel GRE interface: %s (%s)",
+                 port_row->name, strerror(errno));
+        return false;
+    } else {
+        VLOG_DBG("GRE link '%s' created successfully.", port->name);
+        portd_gre_cache_create(port, ttl_str, src_ip_str, dest_ip_str);
+    }
+
+    VLOG_INFO("Link for GRE tunnel '%s' created.", port->name);
+    return true;
 }

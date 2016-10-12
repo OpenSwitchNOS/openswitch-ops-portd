@@ -152,8 +152,6 @@ static void portd_interface_up_down(const char *interface_name,
                                     const char *status);
 static void portd_set_interface_mtu(const char *interface_name,
                                     unsigned int mtu);
-static struct ovsrec_interface* portd_get_matching_interface_row(
-        const struct ovsrec_port *portrow);
 static struct ovsrec_port* portd_get_port_row(
         const struct ovsrec_interface *intf_row);
 static void portd_port_admin_state_reconfigure(
@@ -212,8 +210,6 @@ static void ops_portd_exit(struct unixctl_conn *conn, int argc OVS_UNUSED,
 extern int
 portd_get_prefix(int family, char *ip_address, void *prefix,
                  unsigned char *prefixlen);
-void
-portd_del_interface_netlink(const char *sub_interface_name, struct vrf *vrf);
 
 /* Lag bonding related functions */
 static void portd_del_old_interface(struct shash_node *sh_node);
@@ -356,8 +352,40 @@ portd_interface_type_subinterface_check(const struct ovsrec_port *port,
     return false;
 }
 
+/*
+ * Function: portd_interface_type_gre_check
+ * Param:
+ *      port: port record whose interfaces are examined for "gre" type
+ * Return:
+ *      true  : Provided interface exists and is of type "gre"
+ *      false : Provide interface either doesn't exist or not "gre".
+ */
+bool
+portd_interface_type_gre_check(const struct ovsrec_port *port)
+{
+    if (!port) {
+        VLOG_ERR("[%s:%d]: Invalid port reference", __FUNCTION__, __LINE__);
+        return false;
+    }
 
+    struct ovsrec_interface *intf;
+    size_t i;
 
+    for (i = 0; i < port->n_interfaces; i++) {
+        intf = port->interfaces[i];
+
+        if (intf && !strcmp(port->name, intf->name) &&
+            !strcmp(intf->type, OVSREC_INTERFACE_TYPE_GRE_IPV4)) {
+            VLOG_DBG("[%s:%d]: Interface %s of GRE type found.",
+                    __FUNCTION__, __LINE__, intf->name);
+            return true;
+        }
+    }
+
+    VLOG_DBG("[%s:%d]: Interface %s is NOT of type GRE. ",
+             __FUNCTION__, __LINE__, port->name);
+    return false;
+}
 
 /**
  * Function: portd_port_in_bridge_check
@@ -841,6 +869,7 @@ portd_init(const char *remote)
     ovsdb_idl_add_column(idl, &ovsrec_interface_col_subintf_parent);
     ovsdb_idl_add_column(idl, &ovsrec_interface_col_hw_bond_config);
     ovsdb_idl_add_column(idl, &ovsrec_interface_col_forwarding_state);
+    ovsdb_idl_add_column(idl, &ovsrec_interface_col_options);
 
     ovsdb_idl_add_table(idl, &ovsrec_table_vlan);
     ovsdb_idl_add_column(idl, &ovsrec_vlan_col_name);
@@ -1143,12 +1172,7 @@ portd_reconfigure_subinterface(const struct ovsrec_port *port_row)
 {
     int ifindex;
 
-    struct {
-        struct nlmsghdr  n;
-        struct ifinfomsg i;
-        char             buf[128];  /* must fit interface name length (IFNAMSIZ)
-                                       and attribute hdrs. */
-    } req;
+    struct netlink_req req;
     unsigned short vlan_tag = 0;
     const struct ovsrec_interface *intf_row = NULL,  *parent_intf_row = NULL;
     memset(&req, 0, sizeof(req));
@@ -1282,12 +1306,7 @@ masklen2ip (int masklen,char* netmask)
 void
 portd_del_interface_netlink(const char *interface_name, struct vrf *vrf)
 {
-    struct {
-        struct nlmsghdr  n;
-        struct ifinfomsg i;
-        char             buf[128];
-    } req;
-
+    struct netlink_req req;
     memset(&req, 0, sizeof(req));
 
     req.n.nlmsg_len = NLMSG_SPACE(sizeof(struct ifinfomsg));
@@ -1315,14 +1334,14 @@ portd_del_interface_netlink(const char *interface_name, struct vrf *vrf)
 }
 
 
-/* Function : fffffffet_matching_interface_row()
+/* Function : portd_get_matching_interface_row()
  * Desc     : search the ovsdb and get the matching
  *            interface row based on the port row name.
  * Param    : seach based on row name
  * Return   : returns the matching row or NULL incase
  *            no row is found.
  */
-static struct ovsrec_interface *
+struct ovsrec_interface *
 portd_get_matching_interface_row(const struct ovsrec_port *port_row)
 {
     const struct ovsrec_interface *int_row = NULL;
@@ -1696,6 +1715,20 @@ portd_handle_interface_config_mods(void)
                     }
                 }
             }
+
+            if (OVSREC_IDL_IS_COLUMN_MODIFIED(ovsrec_interface_col_options,
+                                              idl_seqno)) {
+                if (!strcmp(intf_row->type, OVSREC_INTERFACE_TYPE_GRE_IPV4)) {
+                    VLOG_DBG("Detected interface options updates");
+                    portd_reconfigure_tunnel_gre(port_row, port);
+
+                    if (port_row && port && port->gre) {
+                        portd_reconfig_ipaddr(port,
+                                              CONST_CAST(struct ovsrec_port*,
+                                                         port_row));
+                    }
+                }
+            }
         }
     }
 }
@@ -2011,11 +2044,11 @@ portd_reconfig_ports(struct vrf *vrf, const struct shash *wanted_ports)
                               SWITCH_NAMESPACE, vrf->name);
                 }
             }
+
             portd_config_src_routing(vrf, port_row->name, true);
             if (portd_interface_type_internal_check(port_row, port_row->name) &&
                 portd_port_in_bridge_check(port_row->name, DEFAULT_BRIDGE_NAME) &&
                 portd_port_in_vrf_check(port_row->name, DEFAULT_VRF_NAME)) {
-
                 portd_add_vlan_interface(DEFAULT_BRIDGE_NAME, port_row->name,
                                          ops_port_get_tag(port->cfg));
                 portd_interface_up_down(port_row->name,
@@ -2036,6 +2069,11 @@ portd_reconfig_ports(struct vrf *vrf, const struct shash *wanted_ports)
                 port->type = xstrdup(OVSREC_INTERFACE_TYPE_LOOPBACK);
                 lpbk_count++;
                 log_event("LOOPBACK_CREATE", EV_KV("interface", "%s", port_row->name));
+            } else if (portd_interface_type_gre_check(port_row)) {
+                port->type = xstrdup(OVSREC_INTERFACE_TYPE_GRE_IPV4);
+
+                log_event("GRE_CREATE", EV_KV("interface", "%s",
+                          port_row->name));
             } else {
                 /* Only assign internal VLAN if not already present. */
                 smap_clone(&hw_cfg_smap, &port_row->hw_config);
@@ -2077,16 +2115,22 @@ portd_reconfig_ports(struct vrf *vrf, const struct shash *wanted_ports)
             portd_reconfig_ipaddr(port, port_row);
             VLOG_DBG("Port has IP: %s vrf %s\n", port_row->ip4_address,
                       vrf->name);
-
-        } else if (port) {
+        } else {
             if (OVSREC_IDL_IS_ROW_MODIFIED(port_row, idl_seqno)) {
-                if ((NULL != port->type) &&
-                    (strcmp(port->type,
-                     OVSREC_INTERFACE_TYPE_LOOPBACK) == 0)) {
-                    portd_reconfig_ns_loopback(port, port_row, false);
-                    portd_register_event_log(port_row, port);
-                    continue;
+                if (port->type) {
+                    if (!strcmp(port->type, OVSREC_INTERFACE_TYPE_LOOPBACK)) {
+                        portd_reconfig_ns_loopback(port, port_row, false);
+                        portd_register_event_log(port_row, port);
+                        continue;
+                    } else if (!strcmp(port->type,
+                                       OVSREC_INTERFACE_TYPE_GRE_IPV4)) {
+                        if (!port->gre) {
+                            VLOG_DBG("GRE not created yet, skip configuration");
+                            continue;
+                        }
+                    }
                 }
+
                 portd_reconfig_ipaddr(port, port_row);
                 portd_register_event_log(port_row, port);
                 portd_port_admin_state_reconfigure(port, port_row);
@@ -2133,9 +2177,6 @@ portd_reconfig_ports(struct vrf *vrf, const struct shash *wanted_ports)
                     }
                 }
             }
-        } else {
-            VLOG_DBG("[%s:%d]: port %s exists, but no change in seqno",
-                       __FUNCTION__, __LINE__, port_row->name);
         }
     }
 
@@ -2231,8 +2272,102 @@ portd_port_destroy(struct port *port)
         hmap_destroy(&port->secondary_ip6addr);
         hmap_remove(&vrf->ports, &port->port_node);
         SAFE_FREE(port->name);
+
+        portd_gre_cache_delete(port->gre);
+
         SAFE_FREE(port);
     }
+}
+
+/*
+ * Create internal GRE cache for detecting changes to the time-to-live value,
+ * tunnel source ip, and tunnel destination IP. Reuses existing cache if one
+ * already exists.
+ */
+void
+portd_gre_cache_create(struct port *port, const char *ttl, const char *src_ip,
+                       const char *dest_ip)
+{
+    if (!port) {
+        VLOG_ERR("Invalid port. Failed to create GRE cache");
+        return;
+    }
+
+    struct gre *gre = port->gre;
+
+    if (!gre) {
+        gre = xzalloc(sizeof(*gre));
+        memset(gre, 0, sizeof(*gre));
+        port->gre = gre;
+    }
+
+    portd_gre_cache_update(gre, ttl, src_ip, dest_ip);
+    VLOG_DBG("GRE tunnel cached");
+}
+
+/*
+ * Update internal GRE cache for detecting changes to the time-to-live value,
+ * tunnel source ip, and tunnel destination IP.
+ */
+bool
+portd_gre_cache_update(struct gre *gre, const char *ttl, const char *src_ip,
+                       const char *dest_ip)
+{
+    if (!gre) {
+        VLOG_ERR("Invalid GRE. Failed to update cache.");
+        return false;
+    }
+
+    bool updated = false;
+
+    if (ttl) {
+        if (strcmp(gre->ttl, ttl)) {
+            strncpy(gre->ttl, ttl, TTL_STRLEN);
+            gre->ttl[TTL_STRLEN-1] = '\0';
+            updated = true;
+        }
+    } else if (gre->ttl[0]) {
+        gre->ttl[0] = '\0';
+        updated = true;
+    }
+
+    if (src_ip) {
+        if (strcmp(gre->src_ip, src_ip)) {
+            strncpy(gre->src_ip, src_ip, INET_ADDRSTRLEN);
+            gre->src_ip[INET_ADDRSTRLEN-1] = '\0';
+            updated = true;
+        }
+    } else if (gre->src_ip[0]) {
+        gre->src_ip[0] = '\0';
+        updated = true;
+    }
+
+    if (dest_ip) {
+        if (strcmp(gre->dest_ip, dest_ip)) {
+            strncpy(gre->dest_ip, dest_ip, INET_ADDRSTRLEN);
+            gre->dest_ip[INET_ADDRSTRLEN-1] = '\0';
+            updated = true;
+        }
+    } else if (gre->dest_ip[0]) {
+        gre->dest_ip[0] = '\0';
+        updated = true;
+    }
+
+    VLOG_DBG("GRE tunnel cache %s updated", updated ? "was" : "not");
+    return updated;
+}
+
+/* Delete internal GRE cache */
+void
+portd_gre_cache_delete(struct gre *gre)
+{
+    if (!gre) {
+        VLOG_ERR("Invalid GRE. Failed to delete cache.");
+        return;
+    }
+
+    SAFE_FREE(gre);
+    VLOG_DBG("GRE tunnel cache deleted");
 }
 
 /* remove the ports that are in local cache and not in db */
@@ -2288,6 +2423,11 @@ portd_del_ports(struct vrf *vrf, const struct shash *wanted_ports)
                     log_event("LOOPBACK_DELETE", EV_KV("interface",
                               "%s", port->name));
                 }
+            }
+            else if (port->type &&
+                     !strcmp(port->type, OVSREC_INTERFACE_TYPE_GRE_IPV4)) {
+                portd_del_interface_netlink(port->name,
+                                            portd_vrf_lookup(DEFAULT_VRF_NAME));
             }
 
             if (port->proxy_arp_enabled) {
@@ -3224,12 +3364,7 @@ ops_portd_exit(struct unixctl_conn *conn, int argc OVS_UNUSED,
 bool portd_add_interface_netlink(struct ovsrec_port *port_row,
                                  char* intf_type, int ifi_index)
 {
-    struct {
-        struct nlmsghdr  n;
-        struct ifinfomsg i;
-        char             buf[128];  /* must fit interface name length (IFNAMSIZ)
-                                       and attribute hdrs. */
-    } req;
+    struct netlink_req req;
 
     VLOG_INFO("Creating %s interface for interface %s", intf_type, port_row->name);
     req.n.nlmsg_len = NLMSG_SPACE(sizeof(struct ifinfomsg));
